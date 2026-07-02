@@ -14,6 +14,7 @@ export interface QueryTab {
 interface QueryState {
   tabs: QueryTab[];
   activeTabId: string | null;
+  historyRefreshKey: number;
   addTab: (sql?: string, title?: string) => void;
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
@@ -38,6 +39,7 @@ function createTab(sql = "SELECT 1;", title?: string): QueryTab {
 export const useQueryStore = create<QueryState>((set, get) => ({
   tabs: [createTab()],
   activeTabId: null,
+  historyRefreshKey: 0,
 
   addTab: (sql, title) => {
     const tab = createTab(sql, title);
@@ -85,6 +87,8 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         null,
         error instanceof Error ? error.message : String(error),
       );
+    } finally {
+      set((state) => ({ historyRefreshKey: state.historyRefreshKey + 1 }));
     }
   },
 

@@ -54,6 +54,17 @@ export interface ExportPayload {
   filename: string;
 }
 
+export interface QueryHistoryEntry {
+  id: string;
+  sql: string;
+  connectionId: string | null;
+  executedAt: string;
+  executionTimeMs: number;
+  rowCount: number;
+  success: boolean;
+  error: string | null;
+}
+
 export const tauriApi = {
   listConnections: () => invoke<ConnectionSummary[]>("list_connections"),
   saveConnection: (input: ConnectionInput) =>
@@ -79,6 +90,8 @@ export const tauriApi = {
     invoke<QueryResult>("execute_query", { connectionId, queryId, sql }),
   cancelQuery: (queryId: string) => invoke<void>("cancel_query", { queryId }),
   generateQueryId: () => invoke<string>("generate_query_id"),
+  listQueryHistory: (limit = 100) =>
+    invoke<QueryHistoryEntry[]>("list_query_history", { limit }),
   exportResults: (
     result: QueryResult,
     format: "csv" | "json" | "sql",

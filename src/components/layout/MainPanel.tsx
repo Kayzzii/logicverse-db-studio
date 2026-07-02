@@ -1,8 +1,10 @@
 import { Loader2, Play, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/shared/Kbd";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { QueryTabs } from "@/components/editor/QueryTabs";
 import { QueryEditor } from "@/components/editor/QueryEditor";
+import { QueryHistory } from "@/components/editor/QueryHistory";
 import { ResultsTable } from "@/components/results/ResultsTable";
 import { ResultsExport } from "@/components/results/ResultsExport";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -46,7 +48,19 @@ export function MainPanel() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <Tabs defaultValue="editor" className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3">
+        <TabsList className="h-9 bg-transparent">
+          <TabsTrigger value="editor">Editor</TabsTrigger>
+          <TabsTrigger value="history">Historial</TabsTrigger>
+        </TabsList>
+      </div>
+
+      <TabsContent value="history" className="mt-0 min-h-0 flex-1">
+        <QueryHistory />
+      </TabsContent>
+
+      <TabsContent value="editor" className="mt-0 flex min-h-0 flex-1 flex-col">
       <QueryTabs />
 
       <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2">
@@ -115,6 +129,7 @@ export function MainPanel() {
           )}
         </div>
       </div>
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }

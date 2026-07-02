@@ -9,6 +9,7 @@ use tauri::Manager;
 use uuid::Uuid;
 
 use config::connections::{ConnectionInput, ConnectionSummary};
+use config::query_history::QueryHistoryEntry;
 use db::{ColumnInfo, DbManager, QueryResult, TableInfo};
 use error::AppResult;
 
@@ -125,6 +126,14 @@ async fn cancel_query(
 }
 
 #[tauri::command]
+async fn list_query_history(
+    state: tauri::State<'_, AppState>,
+    limit: Option<usize>,
+) -> AppResult<Vec<QueryHistoryEntry>> {
+    state.db.list_query_history(limit.unwrap_or(100)).await
+}
+
+#[tauri::command]
 fn generate_query_id() -> String {
     Uuid::new_v4().to_string()
 }
@@ -188,8 +197,10 @@ pub fn run() {
                 .expect("failed to resolve app config dir");
 
             let connections_path = config_dir.join("connections.json");
+            let query_history_path = config_dir.join("query_history.json");
             let store = config::connections::ConnectionsStore::new(connections_path);
-            let db = DbManager::new(store);
+            let history = config::query_history::QueryHistoryStore::new(query_history_path);
+            let db = DbManager::new(store, history);
 
             app.manage(AppState { db: Arc::new(db) });
             Ok(())
@@ -209,6 +220,7 @@ pub fn run() {
             execute_query,
             cancel_query,
             generate_query_id,
+            list_query_history,
             export_results,
         ])
         .run(tauri::generate_context!())

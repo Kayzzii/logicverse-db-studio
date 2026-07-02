@@ -3,29 +3,45 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use keyring::Entry;
 use rand::RngCore;
-use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, AppResult};
 
 const NONCE_SIZE: usize = 12;
+const KEYRING_SERVICE: &str = "logicverse-db-studio";
+const KEYRING_USER: &str = "master-key";
 
-/// Deriva una clave AES-256 a partir de identificadores de la máquina.
-pub fn derive_machine_key() -> AppResult<[u8; 32]> {
-    let host = hostname::get()
-        .map(|h| h.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "logicverse-db-studio".to_string());
+/// Obtiene o crea una master key aleatoria almacenada en el keyring del SO.
+pub fn get_or_create_master_key() -> AppResult<[u8; 32]> {
+    let entry = Entry::new(KEYRING_SERVICE, KEYRING_USER)
+        .map_err(|e| AppError::Crypto(format!("Keyring error: {e}")))?;
 
-    let mut hasher = Sha256::new();
-    hasher.update(b"logicverse-db-studio-v1");
-    hasher.update(host.as_bytes());
-    hasher.update(std::env::consts::OS.as_bytes());
-    hasher.update(std::env::consts::ARCH.as_bytes());
+    match entry.get_password() {
+        Ok(encoded) => {
+            let bytes = BASE64
+                .decode(encoded.trim())
+                .map_err(|e| AppError::Crypto(format!("Invalid key: {e}")))?;
 
-    let result = hasher.finalize();
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&result);
-    Ok(key)
+            if bytes.len() != 32 {
+                return Err(AppError::Crypto("Invalid master key length".into()));
+            }
+
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&bytes);
+            Ok(key)
+        }
+        Err(_) => {
+            let mut key = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut key);
+
+            entry
+                .set_password(&BASE64.encode(key))
+                .map_err(|e| AppError::Crypto(format!("Keyring save error: {e}")))?;
+
+            Ok(key)
+        }
+    }
 }
 
 pub fn encrypt(plaintext: &str) -> AppResult<String> {
@@ -33,7 +49,7 @@ pub fn encrypt(plaintext: &str) -> AppResult<String> {
         return Ok(String::new());
     }
 
-    let key = derive_machine_key()?;
+    let key = get_or_create_master_key()?;
     let cipher = Aes256Gcm::new_from_slice(&key)
         .map_err(|e| AppError::Crypto(format!("Invalid key: {e}")))?;
 
@@ -55,7 +71,7 @@ pub fn decrypt(encoded: &str) -> AppResult<String> {
         return Ok(String::new());
     }
 
-    let key = derive_machine_key()?;
+    let key = get_or_create_master_key()?;
     let cipher = Aes256Gcm::new_from_slice(&key)
         .map_err(|e| AppError::Crypto(format!("Invalid key: {e}")))?;
 

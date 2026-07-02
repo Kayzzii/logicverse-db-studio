@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
@@ -60,11 +61,15 @@ struct ConnectionsFile {
 
 pub struct ConnectionsStore {
     path: std::path::PathBuf,
+    write_lock: Mutex<()>,
 }
 
 impl ConnectionsStore {
     pub fn new(path: std::path::PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            write_lock: Mutex::new(()),
+        }
     }
 
     fn load_file(&self) -> AppResult<ConnectionsFile> {
@@ -88,6 +93,11 @@ impl ConnectionsStore {
     }
 
     pub fn list(&self) -> AppResult<Vec<ConnectionSummary>> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| AppError::Message("Connections store lock poisoned".into()))?;
+
         let file = self.load_file()?;
         Ok(file
             .connections
@@ -105,6 +115,11 @@ impl ConnectionsStore {
     }
 
     pub fn get(&self, id: &str) -> AppResult<ConnectionConfig> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| AppError::Message("Connections store lock poisoned".into()))?;
+
         let file = self.load_file()?;
         let stored = file
             .connections
@@ -127,6 +142,11 @@ impl ConnectionsStore {
     }
 
     pub fn save(&self, input: ConnectionInput) -> AppResult<ConnectionSummary> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| AppError::Message("Connections store lock poisoned".into()))?;
+
         let mut file = self.load_file()?;
         let id = input
             .id
@@ -176,6 +196,11 @@ impl ConnectionsStore {
     }
 
     pub fn delete(&self, id: &str) -> AppResult<()> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| AppError::Message("Connections store lock poisoned".into()))?;
+
         let mut file = self.load_file()?;
         let before = file.connections.len();
         file.connections.retain(|c| c.id != id);
@@ -191,6 +216,8 @@ impl ConnectionsStore {
 
 impl ConnectionConfig {
     pub fn build_url(&self) -> String {
+        use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+
         let ssl = match self.ssl_mode.as_str() {
             "require" => "?sslmode=require",
             "verify-ca" => "?sslmode=verify-ca",
@@ -200,22 +227,12 @@ impl ConnectionConfig {
 
         format!(
             "postgresql://{}:{}@{}:{}/{}{}",
-            encode_userinfo(&self.username),
-            encode_userinfo(&self.password),
+            utf8_percent_encode(&self.username, NON_ALPHANUMERIC),
+            utf8_percent_encode(&self.password, NON_ALPHANUMERIC),
             self.host,
             self.port,
             self.database,
             ssl
         )
     }
-}
-
-fn encode_userinfo(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
-            _ => format!("%{:02X}", c as u32),
-        })
-        .collect()
 }

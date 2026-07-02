@@ -3,12 +3,16 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Column, PgPool, Row, TypeInfo, ValueRef};
 use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::config::connections::{ConnectionConfig, ConnectionInput, ConnectionSummary, ConnectionsStore};
+use crate::config::query_history::{QueryHistoryEntry, QueryHistoryStore};
 use crate::error::{AppError, AppResult};
 
 const MAX_ROWS: usize = 100_000;
@@ -17,22 +21,20 @@ const MAX_ROWS: usize = 100_000;
 pub struct DbManager {
     pools: Arc<RwLock<HashMap<String, PgPool>>>,
     active_connection: Arc<RwLock<Option<String>>>,
-    cancel_flags: Arc<Mutex<HashMap<String, bool>>>,
+    cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     connections_store: Arc<ConnectionsStore>,
+    query_history: Arc<QueryHistoryStore>,
 }
 
 impl DbManager {
-    pub fn new(connections_store: ConnectionsStore) -> Self {
+    pub fn new(connections_store: ConnectionsStore, query_history: QueryHistoryStore) -> Self {
         Self {
             pools: Arc::new(RwLock::new(HashMap::new())),
             active_connection: Arc::new(RwLock::new(None)),
-            cancel_flags: Arc::new(Mutex::new(HashMap::new())),
+            cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             connections_store: Arc::new(connections_store),
+            query_history: Arc::new(query_history),
         }
-    }
-
-    pub fn store(&self) -> &ConnectionsStore {
-        &self.connections_store
     }
 
     pub async fn list_connections(&self) -> AppResult<Vec<ConnectionSummary>> {
@@ -126,26 +128,35 @@ impl DbManager {
 
     pub async fn list_databases(&self, connection_id: &str) -> AppResult<Vec<String>> {
         let pool = self.pool_for(connection_id).await?;
-        let rows: Vec<(String,)> =
-            sqlx::query_as("SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname")
-                .fetch_all(&pool)
-                .await?;
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname",
+        )
+        .fetch_all(&pool)
+        .await?;
 
         Ok(rows.into_iter().map(|(name,)| name).collect())
     }
 
     pub async fn list_schemas(&self, connection_id: &str, database: &str) -> AppResult<Vec<String>> {
-        let pool = self.pool_for(connection_id).await?;
-        let query = format!(
-            "SELECT schema_name FROM information_schema.schemata \
-             WHERE catalog_name = $1 AND schema_name NOT IN ('pg_toast', 'pg_temp_1', 'pg_toast_temp_1') \
-             ORDER BY schema_name"
-        );
+        let config = self.connections_store.get(connection_id)?;
 
-        let rows: Vec<(String,)> = sqlx::query_as(&query)
-            .bind(database)
-            .fetch_all(&pool)
-            .await?;
+        if database != config.database {
+            return Err(AppError::Message(format!(
+                "Solo se pueden listar schemas de la base de datos activa ('{}'). Reconectá a '{database}' para explorarla.",
+                config.database
+            )));
+        }
+
+        let pool = self.pool_for(connection_id).await?;
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT schema_name FROM information_schema.schemata \
+             WHERE schema_name NOT IN ('pg_toast', 'pg_temp_1', 'pg_toast_temp_1') \
+               AND schema_name NOT LIKE 'pg_temp_%' \
+               AND schema_name NOT LIKE 'pg_toast_temp_%' \
+             ORDER BY schema_name",
+        )
+        .fetch_all(&pool)
+        .await?;
 
         Ok(rows.into_iter().map(|(name,)| name).collect())
     }
@@ -257,9 +268,10 @@ impl DbManager {
         query_id: &str,
         sql: &str,
     ) -> AppResult<QueryResult> {
+        let token = CancellationToken::new();
         {
-            let mut flags = self.cancel_flags.lock().await;
-            flags.insert(query_id.to_string(), false);
+            let mut tokens = self.cancel_tokens.lock().await;
+            tokens.insert(query_id.to_string(), token.clone());
         }
 
         let pool = self.pool_for(connection_id).await?;
@@ -267,6 +279,7 @@ impl DbManager {
 
         let trimmed = sql.trim();
         if trimmed.is_empty() {
+            self.remove_cancel_token(query_id).await;
             return Err(AppError::Message("Query is empty".into()));
         }
 
@@ -277,23 +290,72 @@ impl DbManager {
             || lower.starts_with("explain")
             || lower.starts_with("table");
 
-        if is_select {
-            self.execute_select(&pool, query_id, trimmed, start).await
+        let result = if is_select {
+            self.execute_select(&pool, query_id, trimmed, start, token)
+                .await
         } else {
-            self.execute_mutation(&pool, query_id, trimmed, start).await
+            self.execute_mutation(&pool, query_id, trimmed, start, token)
+                .await
+        };
+
+        self.remove_cancel_token(query_id).await;
+
+        let execution_time_ms = start.elapsed().as_millis() as u64;
+        match &result {
+            Ok(query_result) => {
+                let _ = self.query_history.append(QueryHistoryEntry {
+                    id: Uuid::new_v4().to_string(),
+                    sql: trimmed.to_string(),
+                    connection_id: Some(connection_id.to_string()),
+                    executed_at: Utc::now(),
+                    execution_time_ms,
+                    row_count: query_result.row_count,
+                    success: true,
+                    error: None,
+                });
+            }
+            Err(error) => {
+                let _ = self.query_history.append(QueryHistoryEntry {
+                    id: Uuid::new_v4().to_string(),
+                    sql: trimmed.to_string(),
+                    connection_id: Some(connection_id.to_string()),
+                    executed_at: Utc::now(),
+                    execution_time_ms,
+                    row_count: 0,
+                    success: false,
+                    error: Some(error.to_string()),
+                });
+            }
         }
+
+        result
     }
 
     async fn execute_select(
         &self,
         pool: &PgPool,
-        query_id: &str,
+        _query_id: &str,
         sql: &str,
         start: Instant,
+        token: CancellationToken,
     ) -> AppResult<QueryResult> {
-        let rows = sqlx::query(sql).fetch_all(pool).await?;
+        let mut conn = pool.acquire().await?;
+        let backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *conn)
+            .await?;
 
-        if self.is_cancelled(query_id).await {
+        let sql_owned = sql.to_string();
+        let pool_for_cancel = pool.clone();
+
+        let rows = tokio::select! {
+            res = sqlx::query(&sql_owned).fetch_all(&mut *conn) => res?,
+            _ = token.cancelled() => {
+                cancel_postgres_query(&pool_for_cancel, backend_pid).await;
+                return Err(AppError::Message("Query cancelled".into()));
+            }
+        };
+
+        if token.is_cancelled() {
             return Err(AppError::Message("Query cancelled".into()));
         }
 
@@ -318,7 +380,7 @@ impl DbManager {
         let mut truncated = false;
 
         for (idx, row) in rows.into_iter().enumerate() {
-            if self.is_cancelled(query_id).await {
+            if token.is_cancelled() {
                 return Err(AppError::Message("Query cancelled".into()));
             }
 
@@ -329,7 +391,7 @@ impl DbManager {
 
             let mut values = Vec::with_capacity(columns.len());
             for col_idx in 0..columns.len() {
-                values.push(cell_to_string(row, col_idx)?);
+                values.push(cell_to_string(&row, col_idx)?);
             }
             result_rows.push(values);
         }
@@ -349,15 +411,26 @@ impl DbManager {
     async fn execute_mutation(
         &self,
         pool: &PgPool,
-        query_id: &str,
+        _query_id: &str,
         sql: &str,
         start: Instant,
+        token: CancellationToken,
     ) -> AppResult<QueryResult> {
-        if self.is_cancelled(query_id).await {
-            return Err(AppError::Message("Query cancelled".into()));
-        }
+        let mut conn = pool.acquire().await?;
+        let backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *conn)
+            .await?;
 
-        let result = sqlx::query(sql).execute(pool).await?;
+        let sql_owned = sql.to_string();
+        let pool_for_cancel = pool.clone();
+
+        let result = tokio::select! {
+            res = sqlx::query(&sql_owned).execute(&mut *conn) => res?,
+            _ = token.cancelled() => {
+                cancel_postgres_query(&pool_for_cancel, backend_pid).await;
+                return Err(AppError::Message("Query cancelled".into()));
+            }
+        };
 
         Ok(QueryResult {
             columns: vec!["Result".into()],
@@ -370,18 +443,22 @@ impl DbManager {
     }
 
     pub async fn cancel_query(&self, query_id: &str) -> AppResult<()> {
-        let mut flags = self.cancel_flags.lock().await;
-        if flags.contains_key(query_id) {
-            flags.insert(query_id.to_string(), true);
+        let mut tokens = self.cancel_tokens.lock().await;
+        if let Some(token) = tokens.get(query_id) {
+            token.cancel();
             Ok(())
         } else {
             Err(AppError::QueryNotFound(query_id.to_string()))
         }
     }
 
-    async fn is_cancelled(&self, query_id: &str) -> bool {
-        let flags = self.cancel_flags.lock().await;
-        flags.get(query_id).copied().unwrap_or(false)
+    async fn remove_cancel_token(&self, query_id: &str) {
+        let mut tokens = self.cancel_tokens.lock().await;
+        tokens.remove(query_id);
+    }
+
+    pub async fn list_query_history(&self, limit: usize) -> AppResult<Vec<QueryHistoryEntry>> {
+        self.query_history.list(limit)
     }
 
     pub fn export_csv(result: &QueryResult) -> String {
@@ -455,7 +532,17 @@ impl DbManager {
     }
 }
 
+async fn cancel_postgres_query(pool: &PgPool, backend_pid: i32) {
+    if let Ok(mut conn) = pool.acquire().await {
+        let _ = sqlx::query("SELECT pg_cancel_backend($1)")
+            .bind(backend_pid)
+            .execute(&mut *conn)
+            .await;
+    }
+}
+
 fn cell_to_string(row: &sqlx::postgres::PgRow, index: usize) -> AppResult<Option<String>> {
+    use rust_decimal::Decimal;
     use sqlx::ValueRef;
 
     let value = row.try_get_raw(index)?;
@@ -470,7 +557,9 @@ fn cell_to_string(row: &sqlx::postgres::PgRow, index: usize) -> AppResult<Option
         "INT2" | "INT4" => row.try_get::<i32, _>(index).map(|v| v.to_string()),
         "INT8" => row.try_get::<i64, _>(index).map(|v| v.to_string()),
         "FLOAT4" | "FLOAT8" => row.try_get::<f64, _>(index).map(|v| v.to_string()),
-        "NUMERIC" => row.try_get::<String, _>(index),
+        "NUMERIC" => row
+            .try_get::<Decimal, _>(index)
+            .map(|v| v.normalize().to_string()),
         "JSON" | "JSONB" => row
             .try_get::<serde_json::Value, _>(index)
             .map(|v| v.to_string()),
