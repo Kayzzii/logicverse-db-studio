@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -17,6 +18,12 @@ pub struct ConnectionSummary {
     pub database: String,
     pub username: String,
     pub ssl_mode: String,
+    #[serde(default)]
+    pub ssh_enabled: bool,
+    pub ssh_host: Option<String>,
+    pub ssh_port: Option<u16>,
+    pub ssh_user: Option<String>,
+    pub ssh_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +39,13 @@ pub struct ConnectionInput {
     pub username: String,
     pub password: String,
     pub ssl_mode: String,
+    #[serde(default)]
+    pub ssh_enabled: bool,
+    pub ssh_host: Option<String>,
+    pub ssh_port: Option<u16>,
+    pub ssh_user: Option<String>,
+    pub ssh_password: Option<String>,
+    pub ssh_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +59,12 @@ pub struct ConnectionConfig {
     pub username: String,
     pub password: String,
     pub ssl_mode: String,
+    pub ssh_enabled: bool,
+    pub ssh_host: String,
+    pub ssh_port: u16,
+    pub ssh_user: String,
+    pub ssh_password: String,
+    pub ssh_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +79,13 @@ struct StoredConnection {
     username: String,
     ssl_mode: String,
     encrypted_password: String,
+    #[serde(default)]
+    ssh_enabled: bool,
+    ssh_host: Option<String>,
+    ssh_port: Option<u16>,
+    ssh_user: Option<String>,
+    encrypted_ssh_password: Option<String>,
+    ssh_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +147,11 @@ impl ConnectionsStore {
                 database: c.database,
                 username: c.username,
                 ssl_mode: c.ssl_mode,
+                ssh_enabled: c.ssh_enabled,
+                ssh_host: c.ssh_host,
+                ssh_port: c.ssh_port,
+                ssh_user: c.ssh_user,
+                ssh_key_path: c.ssh_key_path,
             })
             .collect())
     }
@@ -138,6 +170,10 @@ impl ConnectionsStore {
             .ok_or_else(|| AppError::ConnectionNotFound(id.to_string()))?;
 
         let password = decrypt(&self.config_dir, &stored.encrypted_password)?;
+        let ssh_password = match stored.encrypted_ssh_password {
+            Some(ref encrypted) if !encrypted.is_empty() => decrypt(&self.config_dir, encrypted)?,
+            _ => String::new(),
+        };
 
         Ok(ConnectionConfig {
             id: stored.id,
@@ -149,6 +185,12 @@ impl ConnectionsStore {
             username: stored.username,
             password,
             ssl_mode: stored.ssl_mode,
+            ssh_enabled: stored.ssh_enabled,
+            ssh_host: stored.ssh_host.unwrap_or_default(),
+            ssh_port: stored.ssh_port.unwrap_or(22),
+            ssh_user: stored.ssh_user.unwrap_or_default(),
+            ssh_password,
+            ssh_key_path: stored.ssh_key_path,
         })
     }
 
@@ -167,6 +209,14 @@ impl ConnectionsStore {
         }
         if driver != DatabaseDriver::Sqlite && input.host.trim().is_empty() {
             return Err(AppError::Message("Host is required".into()));
+        }
+        if input.ssh_enabled {
+            if input.ssh_host.as_deref().unwrap_or("").trim().is_empty() {
+                return Err(AppError::Message("SSH host is required".into()));
+            }
+            if input.ssh_user.as_deref().unwrap_or("").trim().is_empty() {
+                return Err(AppError::Message("SSH user is required".into()));
+            }
         }
 
         let mut file = self.load_file()?;
@@ -189,6 +239,26 @@ impl ConnectionsStore {
             encrypt(&self.config_dir, &input.password)?
         };
 
+        let encrypted_ssh_password = if input.ssh_enabled {
+            if input
+                .ssh_password
+                .as_deref()
+                .map(|p| !p.is_empty())
+                .unwrap_or(false)
+            {
+                Some(encrypt(
+                    &self.config_dir,
+                    input.ssh_password.as_deref().unwrap_or(""),
+                )?)
+            } else if let Some(existing) = file.connections.iter().find(|c| c.id == id) {
+                existing.encrypted_ssh_password.clone()
+            } else {
+                Some(encrypt(&self.config_dir, "")?)
+            }
+        } else {
+            None
+        };
+
         let stored = StoredConnection {
             id: id.clone(),
             name: input.name.clone(),
@@ -203,6 +273,12 @@ impl ConnectionsStore {
             username: input.username.clone(),
             ssl_mode: input.ssl_mode.clone(),
             encrypted_password,
+            ssh_enabled: input.ssh_enabled,
+            ssh_host: input.ssh_host.clone(),
+            ssh_port: input.ssh_port,
+            ssh_user: input.ssh_user.clone(),
+            encrypted_ssh_password,
+            ssh_key_path: input.ssh_key_path.clone(),
         };
 
         if let Some(existing) = file.connections.iter_mut().find(|c| c.id == id) {
@@ -222,6 +298,11 @@ impl ConnectionsStore {
             database: input.database,
             username: input.username,
             ssl_mode: input.ssl_mode,
+            ssh_enabled: input.ssh_enabled,
+            ssh_host: input.ssh_host,
+            ssh_port: input.ssh_port,
+            ssh_user: input.ssh_user,
+            ssh_key_path: input.ssh_key_path,
         })
     }
 
@@ -256,12 +337,22 @@ impl ConnectionInput {
             username: self.username.clone(),
             password: self.password.clone(),
             ssl_mode: self.ssl_mode.clone(),
+            ssh_enabled: self.ssh_enabled,
+            ssh_host: self.ssh_host.clone().unwrap_or_default(),
+            ssh_port: self.ssh_port.unwrap_or(22),
+            ssh_user: self.ssh_user.clone().unwrap_or_default(),
+            ssh_password: self.ssh_password.clone().unwrap_or_default(),
+            ssh_key_path: self.ssh_key_path.clone(),
         })
     }
 }
 
 impl ConnectionConfig {
     pub fn build_url(&self) -> AppResult<String> {
+        self.build_url_with_endpoint(&self.host, self.port)
+    }
+
+    pub fn build_url_with_endpoint(&self, host: &str, port: u16) -> AppResult<String> {
         use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
         match self.driver {
@@ -277,8 +368,8 @@ impl ConnectionConfig {
                     "postgresql://{}:{}@{}:{}/{}{}",
                     utf8_percent_encode(&self.username, NON_ALPHANUMERIC),
                     utf8_percent_encode(&self.password, NON_ALPHANUMERIC),
-                    self.host,
-                    self.port,
+                    host,
+                    port,
                     self.database,
                     ssl
                 ))
@@ -294,8 +385,8 @@ impl ConnectionConfig {
                     "mysql://{}:{}@{}:{}/{}{}",
                     utf8_percent_encode(&self.username, NON_ALPHANUMERIC),
                     utf8_percent_encode(&self.password, NON_ALPHANUMERIC),
-                    self.host,
-                    self.port,
+                    host,
+                    port,
                     self.database,
                     ssl
                 ))
@@ -321,5 +412,13 @@ impl ConnectionConfig {
                 }
             }
         }
+    }
+
+    pub fn ssh_key_path_buf(&self) -> Option<PathBuf> {
+        self.ssh_key_path
+            .as_ref()
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from)
     }
 }

@@ -5,6 +5,7 @@ mod explain;
 mod introspection;
 mod pool;
 mod query;
+mod ssh_tunnel;
 mod types;
 
 use std::collections::HashMap;
@@ -22,13 +23,19 @@ pub use types::{
     ColumnInfo, ErDiagramData, ExplainResult, QueryResult, TableInfo,
 };
 
-use crate::config::connections::{ConnectionInput, ConnectionSummary, ConnectionsStore};
+use crate::config::connections::{ConnectionConfig, ConnectionInput, ConnectionSummary, ConnectionsStore};
+use ssh_tunnel::SshTunnel;
 use crate::config::query_history::{QueryHistoryEntry, QueryHistoryStore};
 use crate::config::saved_queries::{SaveQueryInput, SavedQueriesStore, SavedQuery};
 use crate::error::{AppError, AppResult};
 
+struct ActiveConnection {
+    backend: Arc<ConnectedBackend>,
+    ssh_tunnel: Option<SshTunnel>,
+}
+
 pub struct DbManager {
-    backends: Arc<RwLock<HashMap<String, Arc<ConnectedBackend>>>>,
+    backends: Arc<RwLock<HashMap<String, ActiveConnection>>>,
     active_connection: Arc<RwLock<Option<String>>>,
     cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     connections_store: Arc<ConnectionsStore>,
@@ -53,14 +60,64 @@ impl DbManager {
     }
 
     async fn backend_for(
-        backends: Arc<RwLock<HashMap<String, Arc<ConnectedBackend>>>>,
+        backends: Arc<RwLock<HashMap<String, ActiveConnection>>>,
         connection_id: String,
     ) -> AppResult<Arc<ConnectedBackend>> {
         let guard = backends.read().await;
         guard
             .get(&connection_id)
-            .cloned()
+            .map(|active| Arc::clone(&active.backend))
             .ok_or_else(|| AppError::NotConnected(format!("Connection {connection_id} is not active")))
+    }
+
+    async fn resolve_endpoint(
+        config: &ConnectionConfig,
+    ) -> AppResult<(String, u16, Option<SshTunnel>)> {
+        if config.ssh_enabled && config.driver != DatabaseDriver::Sqlite {
+            let ssh_host = config.ssh_host.trim();
+            if ssh_host.is_empty() {
+                return Err(AppError::Message("SSH host is required".into()));
+            }
+            let ssh_user = config.ssh_user.trim();
+            if ssh_user.is_empty() {
+                return Err(AppError::Message("SSH user is required".into()));
+            }
+            let db_host = config.host.trim();
+            if db_host.is_empty() {
+                return Err(AppError::Message("Database host is required for SSH tunnel".into()));
+            }
+
+            let auth = ssh_tunnel::ssh_auth_from_config(&config.ssh_password, &config.ssh_key_path)?;
+            let tunnel = SshTunnel::open(
+                ssh_host,
+                config.ssh_port,
+                ssh_user,
+                auth,
+                db_host,
+                config.port,
+            )
+            .await?;
+
+            Ok(("127.0.0.1".into(), tunnel.local_port(), Some(tunnel)))
+        } else {
+            Ok((config.host.clone(), config.port, None))
+        }
+    }
+
+    async fn open_connection(config: ConnectionConfig) -> AppResult<ActiveConnection> {
+        let (host, port, ssh_tunnel) = Self::resolve_endpoint(&config).await?;
+        let backend = Arc::new(ConnectedBackend::connect_with_endpoint(config, &host, port).await?);
+        Ok(ActiveConnection {
+            backend,
+            ssh_tunnel,
+        })
+    }
+
+    async fn close_active(mut active: ActiveConnection) {
+        active.backend.close().await;
+        if let Some(tunnel) = active.ssh_tunnel.take() {
+            tunnel.close().await;
+        }
     }
 
     async fn remove_cancel_token(
@@ -85,21 +142,42 @@ impl DbManager {
     }
 
     pub async fn test_connection(&self, input: ConnectionInput) -> AppResult<bool> {
-        let config = input.to_config()?;
-        ConnectedBackend::test(&config).await?;
+        let mut config = input.to_config()?;
+        if let Some(id) = input.id.filter(|id| !id.is_empty()) {
+            if let Ok(stored) = self.connections_store.get(&id) {
+                if input.password.is_empty() {
+                    config.password = stored.password;
+                }
+                if input.ssh_enabled
+                    && input
+                        .ssh_password
+                        .as_deref()
+                        .map(|p| p.is_empty())
+                        .unwrap_or(true)
+                {
+                    config.ssh_password = stored.ssh_password;
+                }
+            }
+        }
+
+        let (host, port, ssh_tunnel) = Self::resolve_endpoint(&config).await?;
+        ConnectedBackend::test_with_endpoint(&config, &host, port).await?;
+        if let Some(tunnel) = ssh_tunnel {
+            tunnel.close().await;
+        }
         Ok(true)
     }
 
     pub async fn connect(&self, connection_id: &str) -> AppResult<()> {
         let config = self.connections_store.get(connection_id)?;
-        let backend = Arc::new(ConnectedBackend::connect(config).await?);
+        let active = Self::open_connection(config).await?;
 
         {
             let mut backends = self.backends.write().await;
             if let Some(old) = backends.remove(connection_id) {
-                old.close().await;
+                Self::close_active(old).await;
             }
-            backends.insert(connection_id.to_string(), backend);
+            backends.insert(connection_id.to_string(), active);
         }
 
         let mut active = self.active_connection.write().await;
@@ -110,8 +188,8 @@ impl DbManager {
     pub async fn disconnect(&self, connection_id: &str) -> AppResult<()> {
         {
             let mut backends = self.backends.write().await;
-            if let Some(backend) = backends.remove(connection_id) {
-                backend.close().await;
+            if let Some(active) = backends.remove(connection_id) {
+                Self::close_active(active).await;
             }
         }
 

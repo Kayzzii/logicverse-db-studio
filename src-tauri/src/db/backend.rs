@@ -27,14 +27,18 @@ pub struct ConnectedBackend {
 }
 
 impl ConnectedBackend {
-    pub async fn connect(config: ConnectionConfig) -> AppResult<Self> {
-        let url = config.build_url()?;
+    pub async fn connect_with_endpoint(
+        config: ConnectionConfig,
+        host: &str,
+        port: u16,
+    ) -> AppResult<Self> {
+        let url = config.build_url_with_endpoint(host, port)?;
         let pool = DatabasePool::connect(&url, config.driver).await?;
         Ok(Self { pool, config })
     }
 
-    pub async fn test(config: &ConnectionConfig) -> AppResult<()> {
-        let url = config.build_url()?;
+    pub async fn test_with_endpoint(config: &ConnectionConfig, host: &str, port: u16) -> AppResult<()> {
+        let url = config.build_url_with_endpoint(host, port)?;
         let pool = DatabasePool::connect_test(&url, config.driver).await?;
         pool.ping().await?;
         pool.close().await;
