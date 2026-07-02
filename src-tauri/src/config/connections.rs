@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use uuid::Uuid;
 
+use crate::db::{default_driver_str, DatabaseDriver};
 use crate::error::{AppError, AppResult};
 use crate::security::crypto::{decrypt, encrypt};
 
@@ -10,6 +11,7 @@ use crate::security::crypto::{decrypt, encrypt};
 pub struct ConnectionSummary {
     pub id: String,
     pub name: String,
+    pub driver: String,
     pub host: String,
     pub port: u16,
     pub database: String,
@@ -22,6 +24,8 @@ pub struct ConnectionSummary {
 pub struct ConnectionInput {
     pub id: Option<String>,
     pub name: String,
+    #[serde(default = "default_driver_str")]
+    pub driver: String,
     pub host: String,
     pub port: u16,
     pub database: String,
@@ -34,6 +38,7 @@ pub struct ConnectionInput {
 pub struct ConnectionConfig {
     pub id: String,
     pub name: String,
+    pub driver: DatabaseDriver,
     pub host: String,
     pub port: u16,
     pub database: String,
@@ -46,6 +51,8 @@ pub struct ConnectionConfig {
 struct StoredConnection {
     id: String,
     name: String,
+    #[serde(default = "default_driver_str")]
+    driver: String,
     host: String,
     port: u16,
     database: String,
@@ -107,6 +114,7 @@ impl ConnectionsStore {
             .map(|c| ConnectionSummary {
                 id: c.id,
                 name: c.name,
+                driver: c.driver,
                 host: c.host,
                 port: c.port,
                 database: c.database,
@@ -134,6 +142,7 @@ impl ConnectionsStore {
         Ok(ConnectionConfig {
             id: stored.id,
             name: stored.name,
+            driver: DatabaseDriver::parse(&stored.driver)?,
             host: stored.host,
             port: stored.port,
             database: stored.database,
@@ -149,6 +158,17 @@ impl ConnectionsStore {
             .lock()
             .map_err(|_| AppError::Message("Connections store lock poisoned".into()))?;
 
+        let driver = DatabaseDriver::parse(&input.driver)?;
+        if input.name.trim().is_empty() {
+            return Err(AppError::Message("Connection name is required".into()));
+        }
+        if input.database.trim().is_empty() {
+            return Err(AppError::Message("Database / file path is required".into()));
+        }
+        if driver != DatabaseDriver::Sqlite && input.host.trim().is_empty() {
+            return Err(AppError::Message("Host is required".into()));
+        }
+
         let mut file = self.load_file()?;
         let id = input
             .id
@@ -156,7 +176,9 @@ impl ConnectionsStore {
             .unwrap_or_else(|| Uuid::new_v4().to_string());
 
         let encrypted_password = if input.password.is_empty() {
-            if let Some(existing) = file.connections.iter().find(|c| c.id == id) {
+            if driver == DatabaseDriver::Sqlite {
+                encrypt(&self.config_dir, "")?
+            } else if let Some(existing) = file.connections.iter().find(|c| c.id == id) {
                 existing.encrypted_password.clone()
             } else {
                 return Err(AppError::Message(
@@ -170,8 +192,13 @@ impl ConnectionsStore {
         let stored = StoredConnection {
             id: id.clone(),
             name: input.name.clone(),
+            driver: driver.as_str().to_string(),
             host: input.host.clone(),
-            port: input.port,
+            port: if driver == DatabaseDriver::Sqlite {
+                0
+            } else {
+                input.port
+            },
             database: input.database.clone(),
             username: input.username.clone(),
             ssl_mode: input.ssl_mode.clone(),
@@ -189,6 +216,7 @@ impl ConnectionsStore {
         Ok(ConnectionSummary {
             id,
             name: input.name,
+            driver: driver.as_str().to_string(),
             host: input.host,
             port: input.port,
             database: input.database,
@@ -216,25 +244,82 @@ impl ConnectionsStore {
     }
 }
 
+impl ConnectionInput {
+    pub fn to_config(&self) -> AppResult<ConnectionConfig> {
+        Ok(ConnectionConfig {
+            id: self.id.clone().unwrap_or_default(),
+            name: self.name.clone(),
+            driver: DatabaseDriver::parse(&self.driver)?,
+            host: self.host.clone(),
+            port: self.port,
+            database: self.database.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            ssl_mode: self.ssl_mode.clone(),
+        })
+    }
+}
+
 impl ConnectionConfig {
-    pub fn build_url(&self) -> String {
+    pub fn build_url(&self) -> AppResult<String> {
         use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
-        let ssl = match self.ssl_mode.as_str() {
-            "require" => "?sslmode=require",
-            "verify-ca" => "?sslmode=verify-ca",
-            "verify-full" => "?sslmode=verify-full",
-            _ => "?sslmode=prefer",
-        };
+        match self.driver {
+            DatabaseDriver::Postgres => {
+                let ssl = match self.ssl_mode.as_str() {
+                    "require" => "?sslmode=require",
+                    "verify-ca" => "?sslmode=verify-ca",
+                    "verify-full" => "?sslmode=verify-full",
+                    _ => "?sslmode=prefer",
+                };
 
-        format!(
-            "postgresql://{}:{}@{}:{}/{}{}",
-            utf8_percent_encode(&self.username, NON_ALPHANUMERIC),
-            utf8_percent_encode(&self.password, NON_ALPHANUMERIC),
-            self.host,
-            self.port,
-            self.database,
-            ssl
-        )
+                Ok(format!(
+                    "postgresql://{}:{}@{}:{}/{}{}",
+                    utf8_percent_encode(&self.username, NON_ALPHANUMERIC),
+                    utf8_percent_encode(&self.password, NON_ALPHANUMERIC),
+                    self.host,
+                    self.port,
+                    self.database,
+                    ssl
+                ))
+            }
+            DatabaseDriver::Mysql => {
+                let ssl = if self.ssl_mode == "require" {
+                    "?ssl-mode=REQUIRED"
+                } else {
+                    ""
+                };
+
+                Ok(format!(
+                    "mysql://{}:{}@{}:{}/{}{}",
+                    utf8_percent_encode(&self.username, NON_ALPHANUMERIC),
+                    utf8_percent_encode(&self.password, NON_ALPHANUMERIC),
+                    self.host,
+                    self.port,
+                    self.database,
+                    ssl
+                ))
+            }
+            DatabaseDriver::Sqlite => {
+                let path = self.database.trim();
+                if path.is_empty() {
+                    return Err(AppError::Message("SQLite file path is required".into()));
+                }
+
+                if path == ":memory:" {
+                    return Ok("sqlite::memory:".into());
+                }
+
+                if path.starts_with("sqlite:") {
+                    return Ok(path.to_string());
+                }
+
+                if path.starts_with('/') {
+                    Ok(format!("sqlite://{}", path))
+                } else {
+                    Ok(format!("sqlite:{}", path))
+                }
+            }
+        }
     }
 }

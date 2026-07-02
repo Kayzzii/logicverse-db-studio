@@ -12,7 +12,7 @@ use config::connections::{ConnectionInput, ConnectionSummary};
 use config::query_history::QueryHistoryEntry;
 use config::saved_queries::{SaveQueryInput, SavedQuery};
 use config::settings::AppSettings;
-use db::{ColumnInfo, DbManager, QueryResult, TableInfo};
+use db::{ColumnInfo, DbManager, ErDiagramData, ExplainResult, QueryResult, TableInfo};
 use error::AppResult;
 
 #[derive(Clone)]
@@ -111,13 +111,40 @@ async fn list_columns(
 }
 
 #[tauri::command]
+async fn get_server_version(
+    state: tauri::State<'_, AppState>,
+    connection_id: String,
+) -> AppResult<String> {
+    state.db.get_server_version(&connection_id).await
+}
+
+#[tauri::command]
+async fn explain_query(
+    state: tauri::State<'_, AppState>,
+    connection_id: String,
+    query_id: String,
+    sql: String,
+) -> AppResult<ExplainResult> {
+    state.db.explain_query(connection_id, query_id, sql).await
+}
+
+#[tauri::command]
+async fn get_table_relations(
+    state: tauri::State<'_, AppState>,
+    connection_id: String,
+    schema: String,
+) -> AppResult<ErDiagramData> {
+    state.db.get_table_relations(&connection_id, &schema).await
+}
+
+#[tauri::command]
 async fn execute_query(
     state: tauri::State<'_, AppState>,
     connection_id: String,
     query_id: String,
     sql: String,
 ) -> AppResult<QueryResult> {
-    state.db.execute_query(&connection_id, &query_id, &sql).await
+    state.db.execute_query(connection_id, query_id, sql).await
 }
 
 #[tauri::command]
@@ -261,6 +288,9 @@ pub fn run() {
             list_schemas,
             list_tables,
             list_columns,
+            get_server_version,
+            explain_query,
+            get_table_relations,
             execute_query,
             cancel_query,
             generate_query_id,
