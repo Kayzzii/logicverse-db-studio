@@ -6,7 +6,7 @@ use std::time::Instant;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{Column, PgPool, Row, TypeInfo, ValueRef};
+use sqlx::{Column, PgPool, Row, TypeInfo};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -443,7 +443,7 @@ impl DbManager {
     }
 
     pub async fn cancel_query(&self, query_id: &str) -> AppResult<()> {
-        let mut tokens = self.cancel_tokens.lock().await;
+        let tokens = self.cancel_tokens.lock().await;
         if let Some(token) = tokens.get(query_id) {
             token.cancel();
             Ok(())
@@ -550,7 +550,8 @@ fn cell_to_string(row: &sqlx::postgres::PgRow, index: usize) -> AppResult<Option
         return Ok(None);
     }
 
-    let type_name = value.type_info().name();
+    let binding = value.type_info();
+    let type_name = binding.name();
 
     let text = match type_name {
         "BOOL" => row.try_get::<bool, _>(index).map(|v| v.to_string()),

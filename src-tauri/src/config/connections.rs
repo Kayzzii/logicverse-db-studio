@@ -60,13 +60,15 @@ struct ConnectionsFile {
 }
 
 pub struct ConnectionsStore {
+    config_dir: std::path::PathBuf,
     path: std::path::PathBuf,
     write_lock: Mutex<()>,
 }
 
 impl ConnectionsStore {
-    pub fn new(path: std::path::PathBuf) -> Self {
+    pub fn new(config_dir: std::path::PathBuf, path: std::path::PathBuf) -> Self {
         Self {
+            config_dir,
             path,
             write_lock: Mutex::new(()),
         }
@@ -127,7 +129,7 @@ impl ConnectionsStore {
             .find(|c| c.id == id)
             .ok_or_else(|| AppError::ConnectionNotFound(id.to_string()))?;
 
-        let password = decrypt(&stored.encrypted_password)?;
+        let password = decrypt(&self.config_dir, &stored.encrypted_password)?;
 
         Ok(ConnectionConfig {
             id: stored.id,
@@ -162,7 +164,7 @@ impl ConnectionsStore {
                 ));
             }
         } else {
-            encrypt(&input.password)?
+            encrypt(&self.config_dir, &input.password)?
         };
 
         let stored = StoredConnection {

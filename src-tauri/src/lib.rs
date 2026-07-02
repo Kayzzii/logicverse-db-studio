@@ -198,7 +198,7 @@ pub fn run() {
 
             let connections_path = config_dir.join("connections.json");
             let query_history_path = config_dir.join("query_history.json");
-            let store = config::connections::ConnectionsStore::new(connections_path);
+            let store = config::connections::ConnectionsStore::new(config_dir.clone(), connections_path);
             let history = config::query_history::QueryHistoryStore::new(query_history_path);
             let db = DbManager::new(store, history);
 

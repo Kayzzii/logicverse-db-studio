@@ -1,55 +1,67 @@
+use std::path::Path;
+
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use keyring::Entry;
 use rand::RngCore;
 
 use crate::error::{AppError, AppResult};
 
 const NONCE_SIZE: usize = 12;
-const KEYRING_SERVICE: &str = "logicverse-db-studio";
-const KEYRING_USER: &str = "master-key";
+const MASTER_KEY_FILE: &str = "master.key";
+const KEY_SIZE: usize = 32;
 
-/// Obtiene o crea una master key aleatoria almacenada en el keyring del SO.
-pub fn get_or_create_master_key() -> AppResult<[u8; 32]> {
-    let entry = Entry::new(KEYRING_SERVICE, KEYRING_USER)
-        .map_err(|e| AppError::Crypto(format!("Keyring error: {e}")))?;
+/// Obtiene o crea una master key aleatoria almacenada en `config_dir/master.key`.
+pub fn get_or_create_master_key(config_dir: &Path) -> AppResult<[u8; 32]> {
+    std::fs::create_dir_all(config_dir)?;
 
-    match entry.get_password() {
-        Ok(encoded) => {
-            let bytes = BASE64
-                .decode(encoded.trim())
-                .map_err(|e| AppError::Crypto(format!("Invalid key: {e}")))?;
+    let key_path = config_dir.join(MASTER_KEY_FILE);
 
-            if bytes.len() != 32 {
-                return Err(AppError::Crypto("Invalid master key length".into()));
-            }
-
-            let mut key = [0u8; 32];
+    if key_path.exists() {
+        let bytes = std::fs::read(&key_path)?;
+        if bytes.len() == KEY_SIZE {
+            let mut key = [0u8; KEY_SIZE];
             key.copy_from_slice(&bytes);
-            Ok(key)
-        }
-        Err(_) => {
-            let mut key = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut key);
-
-            entry
-                .set_password(&BASE64.encode(key))
-                .map_err(|e| AppError::Crypto(format!("Keyring save error: {e}")))?;
-
-            Ok(key)
+            return Ok(key);
         }
     }
+
+    let mut key = [0u8; KEY_SIZE];
+    rand::thread_rng().fill_bytes(&mut key);
+
+    std::fs::write(&key_path, key)?;
+    set_owner_only_permissions(&key_path)?;
+
+    Ok(key)
 }
 
-pub fn encrypt(plaintext: &str) -> AppResult<String> {
+fn set_owner_only_permissions(path: &Path) -> AppResult<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut perms = std::fs::metadata(path)?.permissions();
+        perms.set_mode(0o600);
+        std::fs::set_permissions(path, perms)?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+
+    Ok(())
+}
+
+pub fn encrypt(config_dir: &Path, plaintext: &str) -> AppResult<String> {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+
     if plaintext.is_empty() {
         return Ok(String::new());
     }
 
-    let key = get_or_create_master_key()?;
+    let key = get_or_create_master_key(config_dir)?;
     let cipher = Aes256Gcm::new_from_slice(&key)
         .map_err(|e| AppError::Crypto(format!("Invalid key: {e}")))?;
 
@@ -66,12 +78,14 @@ pub fn encrypt(plaintext: &str) -> AppResult<String> {
     Ok(BASE64.encode(payload))
 }
 
-pub fn decrypt(encoded: &str) -> AppResult<String> {
+pub fn decrypt(config_dir: &Path, encoded: &str) -> AppResult<String> {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+
     if encoded.is_empty() {
         return Ok(String::new());
     }
 
-    let key = get_or_create_master_key()?;
+    let key = get_or_create_master_key(config_dir)?;
     let cipher = Aes256Gcm::new_from_slice(&key)
         .map_err(|e| AppError::Crypto(format!("Invalid key: {e}")))?;
 
