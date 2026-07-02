@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import { TopBar } from "@/components/layout/TopBar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { MainPanel } from "@/components/layout/MainPanel";
@@ -6,6 +7,7 @@ import { StatusBar } from "@/components/layout/StatusBar";
 import { ToastContainer } from "@/components/shared/Toast";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 function App() {
   const loadConnections = useConnectionStore((s) => s.loadConnections);
@@ -14,6 +16,7 @@ function App() {
   const tabs = useQueryStore((s) => s.tabs);
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const closeTab = useQueryStore((s) => s.closeTab);
+  const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
 
   useEffect(() => {
     void loadConnections();
@@ -38,13 +41,32 @@ function App() {
   }, [addTab, closeTab, activeTabId, tabs]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[var(--color-background)]">
+    <div className="flex h-screen flex-col overflow-hidden bg-[var(--color-bg-primary)]">
       <TopBar />
-      <div className="flex min-h-0 flex-1">
-        <Sidebar />
-        <main className="min-w-0 flex-1">
-          <MainPanel />
-        </main>
+      <div className="min-h-0 flex-1">
+        <Group
+          key={sidebarCollapsed ? "collapsed" : "expanded"}
+          orientation="horizontal"
+          id="lv-main-layout"
+        >
+          {!sidebarCollapsed && (
+            <>
+              <Panel
+                id="sidebar"
+                defaultSize="20%"
+                minSize="15%"
+                maxSize="31%"
+                className="min-w-[200px] max-w-[400px]"
+              >
+                <Sidebar />
+              </Panel>
+              <Separator className="panel-resize-handle" />
+            </>
+          )}
+          <Panel id="main" minSize="40%">
+            <MainPanel />
+          </Panel>
+        </Group>
       </div>
       <StatusBar />
       <ToastContainer />

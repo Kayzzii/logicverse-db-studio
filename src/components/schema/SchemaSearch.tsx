@@ -1,5 +1,5 @@
+import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Search } from "lucide-react";
 
 interface SchemaSearchProps {
   value: string;
@@ -8,14 +8,25 @@ interface SchemaSearchProps {
 
 export function SchemaSearch({ value, onChange }: SchemaSearchProps) {
   return (
-    <div className="relative px-3 py-2">
-      <Search className="absolute left-5 top-4.5 h-4 w-4 text-[var(--color-muted-foreground)]" />
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Buscar tablas o columnas..."
-        className="pl-8"
-      />
+    <div className="border-b border-[var(--color-border)] px-2 py-2">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Filtrar objetos…"
+          className="h-8 border-[var(--color-border)] bg-[var(--color-bg-tertiary)] pl-8 pr-8 font-mono-db text-xs placeholder:text-[var(--color-text-muted)]"
+        />
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
