@@ -10,12 +10,15 @@ use uuid::Uuid;
 
 use config::connections::{ConnectionInput, ConnectionSummary};
 use config::query_history::QueryHistoryEntry;
+use config::saved_queries::{SaveQueryInput, SavedQuery};
+use config::settings::AppSettings;
 use db::{ColumnInfo, DbManager, QueryResult, TableInfo};
 use error::AppResult;
 
 #[derive(Clone)]
 struct AppState {
     db: Arc<DbManager>,
+    settings: Arc<config::settings::SettingsStore>,
 }
 
 #[tauri::command]
@@ -134,6 +137,40 @@ async fn list_query_history(
 }
 
 #[tauri::command]
+async fn list_saved_queries(state: tauri::State<'_, AppState>) -> AppResult<Vec<SavedQuery>> {
+    Ok(state.db.list_saved_queries()?)
+}
+
+#[tauri::command]
+async fn save_query(
+    state: tauri::State<'_, AppState>,
+    input: SaveQueryInput,
+) -> AppResult<SavedQuery> {
+    Ok(state.db.save_query(input)?)
+}
+
+#[tauri::command]
+async fn delete_saved_query(
+    state: tauri::State<'_, AppState>,
+    query_id: String,
+) -> AppResult<()> {
+    state.db.delete_saved_query(&query_id)
+}
+
+#[tauri::command]
+fn get_settings(state: tauri::State<'_, AppState>) -> AppResult<AppSettings> {
+    state.settings.load()
+}
+
+#[tauri::command]
+fn save_settings(
+    state: tauri::State<'_, AppState>,
+    settings: AppSettings,
+) -> AppResult<()> {
+    state.settings.save(&settings)
+}
+
+#[tauri::command]
 fn generate_query_id() -> String {
     Uuid::new_v4().to_string()
 }
@@ -198,11 +235,18 @@ pub fn run() {
 
             let connections_path = config_dir.join("connections.json");
             let query_history_path = config_dir.join("query_history.json");
+            let saved_queries_path = config_dir.join("saved_queries.json");
+            let settings_path = config_dir.join("settings.json");
             let store = config::connections::ConnectionsStore::new(config_dir.clone(), connections_path);
             let history = config::query_history::QueryHistoryStore::new(query_history_path);
-            let db = DbManager::new(store, history);
+            let saved = config::saved_queries::SavedQueriesStore::new(saved_queries_path);
+            let settings = config::settings::SettingsStore::new(settings_path);
+            let db = DbManager::new(store, history, saved);
 
-            app.manage(AppState { db: Arc::new(db) });
+            app.manage(AppState {
+                db: Arc::new(db),
+                settings: Arc::new(settings),
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -221,6 +265,11 @@ pub fn run() {
             cancel_query,
             generate_query_id,
             list_query_history,
+            list_saved_queries,
+            save_query,
+            delete_saved_query,
+            get_settings,
+            save_settings,
             export_results,
         ])
         .run(tauri::generate_context!())

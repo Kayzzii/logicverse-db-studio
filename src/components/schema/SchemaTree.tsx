@@ -4,21 +4,18 @@ import {
   ChevronRight,
   Database,
   Eye,
-  FolderOpen,
-  Hash,
+  Folder,
   Key,
   Link2,
   List,
   Loader2,
+  Minus,
   RefreshCw,
   Settings,
   Table2,
-  Type,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
 import { SchemaSearch } from "@/components/schema/SchemaSearch";
-import { DataTypeIcon } from "@/components/shared/DataTypeIcon";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -35,25 +32,56 @@ import { tauriApi } from "@/lib/tauri";
 import { copyToClipboard } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
+const INDENT = { db: 0, schema: 16, table: 32, column: 48 } as const;
+
+function TypeBadge({ type }: { type: string }) {
+  return (
+    <span className="ml-auto shrink-0 rounded-[2px] bg-[var(--bg-deep)] px-1 py-px font-mono-db text-[9.5px] text-[var(--text-ghost)]">
+      {type}
+    </span>
+  );
+}
+
+function CountBadge({ count, muted }: { count: number; muted?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded-[2px] px-[5px] font-mono-db text-[10px]",
+        muted
+          ? "bg-[var(--bg-deep)] text-[var(--text-ghost)]"
+          : "bg-[#313244] text-[var(--text-muted)]",
+      )}
+    >
+      {count}
+    </span>
+  );
+}
+
 function TreeRow({
-  depth,
+  indent,
   expanded,
   loading,
   icon,
   label,
+  labelClassName,
   suffix,
+  active,
   onToggle,
+  onClick,
   onDoubleClick,
   className,
   children,
 }: {
-  depth: number;
+  indent: number;
   expanded?: boolean;
   loading?: boolean;
   icon: ReactNode;
   label: string;
+  labelClassName?: string;
   suffix?: ReactNode;
+  active?: boolean;
   onToggle?: () => void;
+  onClick?: () => void;
   onDoubleClick?: () => void;
   className?: string;
   children?: ReactNode;
@@ -63,11 +91,15 @@ function TreeRow({
       <button
         type="button"
         className={cn(
-          "flex w-full items-center gap-1 rounded-sm py-0.5 pr-2 text-left transition-colors duration-100 hover:bg-[var(--color-bg-hover)]",
+          "flex w-full items-center gap-[5px] py-[3px] pr-2 text-left transition-colors hover:bg-[var(--bg-hover)]",
+          active && "border-l-2 border-l-[var(--accent)] bg-[var(--bg-active)]",
           className,
         )}
-        style={{ paddingLeft: `${depth * 12 + 4}px` }}
-        onClick={onToggle}
+        style={{ paddingLeft: `${indent + (active ? 6 : 8)}px` }}
+        onClick={() => {
+          if (onToggle) onToggle();
+          else onClick?.();
+        }}
         onDoubleClick={(e) => {
           e.preventDefault();
           onDoubleClick?.();
@@ -75,40 +107,62 @@ function TreeRow({
       >
         {onToggle ? (
           expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
+            <ChevronDown
+              className={cn(
+                "h-2 w-2 shrink-0",
+                active ? "text-[var(--green)]" : "text-[var(--text-muted)]",
+              )}
+              strokeWidth={2.5}
+            />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
+            <ChevronRight className="h-2 w-2 shrink-0 text-[var(--text-muted)]" strokeWidth={2.5} />
           )
         ) : (
-          <span className="w-3.5 shrink-0" />
+          <span className="w-2 shrink-0" />
         )}
         {icon}
-        <span className="min-w-0 flex-1 truncate font-mono-db text-xs text-[var(--color-text-primary)]">
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate font-mono-db text-xs",
+            labelClassName ?? "text-[var(--text-primary)]",
+          )}
+        >
           {label}
         </span>
         {suffix}
-        {loading && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[var(--color-primary)]" />}
+        {loading && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[var(--accent)]" />}
       </button>
       {children}
     </div>
   );
 }
 
-function SectionLabel({ depth, label }: { depth: number; label: string }) {
+function ColumnRow({ indent, col }: { indent: number; col: ColumnInfo }) {
   return (
     <div
-      className="py-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]"
-      style={{ paddingLeft: `${depth * 12 + 24}px` }}
+      className="flex items-center gap-[5px] py-[3px] pr-2 hover:bg-[var(--bg-hover)]"
+      style={{ paddingLeft: `${indent + 8}px` }}
     >
-      {label}
+      <span className="w-2 shrink-0" />
+      {col.isPrimaryKey ? (
+        <Key className="h-3 w-3 shrink-0 text-[var(--yellow)]" strokeWidth={1.75} />
+      ) : col.foreignKey ? (
+        <Link2 className="h-3 w-3 shrink-0 text-[var(--accent)]" strokeWidth={1.75} />
+      ) : (
+        <Minus className="h-[7px] w-[7px] shrink-0 text-[var(--text-ghost)]" strokeWidth={1} />
+      )}
+      <span className="truncate font-mono-db text-[11px] text-[var(--text-secondary)]">
+        {col.name}
+      </span>
+      <TypeBadge type={col.dataType} />
     </div>
   );
 }
 
 export function SchemaTree() {
-  const connections = useConnectionStore((s) => s.connections);
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId);
-  const activeConnection = connections.find((c) => c.id === activeConnectionId);
+  const connectionList = useConnectionStore((s) => s.connections);
+  const activeConnection = connectionList.find((c) => c.id === activeConnectionId);
   const connectedDatabase = activeConnection?.database ?? null;
 
   const databases = useSchemaStore((s) => s.databases);
@@ -125,11 +179,12 @@ export function SchemaTree() {
   const toggleExpanded = useSchemaStore((s) => s.toggleExpanded);
   const setSelectedDatabase = useSchemaStore((s) => s.setSelectedDatabase);
 
-  const addTab = useQueryStore((s) => s.addTab);
+  const openTableView = useQueryStore((s) => s.openTableView);
   const setCompletionItems = useSchemaCompletionStore((s) => s.setItems);
   const addToast = useSettingsStore((s) => s.addToast);
 
   const [search, setSearch] = useState("");
+  const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [tableCounts, setTableCounts] = useState<Record<string, number>>({});
   const [countLoading, setCountLoading] = useState<Record<string, boolean>>({});
 
@@ -184,7 +239,10 @@ export function SchemaTree() {
   );
 
   const handleOpenTable = (schema: string, table: string) => {
-    addTab(`SELECT * FROM "${schema}"."${table}" LIMIT 100;`, table);
+    setSelectedTable(`${schema}.${table}`);
+    if (activeConnectionId) {
+      void openTableView(schema, table, activeConnectionId);
+    }
   };
 
   const handleCopy = async (text: string, message: string) => {
@@ -212,8 +270,8 @@ export function SchemaTree() {
   if (!activeConnectionId) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
-        <Database className="h-8 w-8 text-[var(--color-text-muted)]" />
-        <p className="text-xs text-[var(--color-text-muted)]">
+        <Database className="h-8 w-8 text-[var(--text-muted)]" />
+        <p className="text-xs text-[var(--text-muted)]">
           Conectá una base de datos para explorar el schema
         </p>
       </div>
@@ -238,6 +296,7 @@ export function SchemaTree() {
 
   const handleToggleTable = async (schema: string, table: string) => {
     const key = nodeKey("table", schema, table);
+    setSelectedTable(`${schema}.${table}`);
     toggleExpanded(key);
     if (!expanded[key]) {
       await loadColumns(activeConnectionId, schema, table);
@@ -246,54 +305,11 @@ export function SchemaTree() {
     updateCompletionItems();
   };
 
-  const renderColumns = (schema: string, table: string, tableColumns: ColumnInfo[], depth: number) => {
-    const colsKey = nodeKey("cols", schema, table);
-    const colsExpanded = expanded[colsKey];
-
-    return (
-      <TreeRow
-        depth={depth}
-        expanded={colsExpanded}
-        icon={<Type className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-secondary)]" />}
-        label="Columns"
-        onToggle={() => toggleExpanded(colsKey)}
-      >
-        {colsExpanded && (
-          <div className="tree-node-enter">
-            {tableColumns.map((col) => (
-              <div
-                key={col.name}
-                className="flex items-center gap-1 py-0.5 pr-2 hover:bg-[var(--color-bg-hover)]"
-                style={{ paddingLeft: `${(depth + 1) * 12 + 28}px` }}
-              >
-                {col.isPrimaryKey ? (
-                  <Key className="h-3 w-3 shrink-0 text-[var(--color-accent-yellow)]" />
-                ) : col.foreignKey ? (
-                  <Link2 className="h-3 w-3 shrink-0 text-[var(--color-primary)]" />
-                ) : (
-                  <span className="w-3 shrink-0" />
-                )}
-                <DataTypeIcon type={col.dataType} />
-                <span className="truncate font-mono-db text-xs text-[var(--color-text-primary)]">
-                  {col.name}
-                </span>
-                <span className="truncate text-[10px] text-[var(--color-text-muted)]">
-                  {col.dataType}
-                  {!col.nullable ? " NOT NULL" : ""}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </TreeRow>
-    );
-  };
-
   return (
     <div className="flex h-full flex-col">
       <SchemaSearch value={search} onChange={setSearch} />
       <ScrollArea className="flex-1">
-        <div className="py-1">
+        <div className="pb-2">
           {databases.map((database) => {
             const dbKey = nodeKey("db", database);
             const isDbExpanded = expanded[dbKey];
@@ -303,16 +319,17 @@ export function SchemaTree() {
             return (
               <div key={database}>
                 <TreeRow
-                  depth={0}
+                  indent={INDENT.db}
                   expanded={isDbExpanded}
                   loading={dbLoading}
-                  icon={<Database className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" />}
+                  icon={<Database className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" strokeWidth={1.75} />}
                   label={database}
                   suffix={
                     isActive ? (
-                      <Badge variant="outline" className="h-4 px-1 text-[9px]">
-                        activa
-                      </Badge>
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--green)]"
+                        aria-hidden
+                      />
                     ) : null
                   }
                   onToggle={() => void handleToggleDatabase(database)}
@@ -320,7 +337,6 @@ export function SchemaTree() {
 
                 {isDbExpanded && selectedDatabase === database && (
                   <div className="tree-node-enter">
-                    <SectionLabel depth={1} label="Schemas" />
                     {filteredSchemas.map((schema) => {
                       const schemaKey = nodeKey("schema", schema);
                       const schemaExpanded = expanded[schemaKey];
@@ -334,19 +350,23 @@ export function SchemaTree() {
                       return (
                         <div key={schema}>
                           <TreeRow
-                            depth={1}
+                            indent={INDENT.schema}
                             expanded={schemaExpanded}
                             loading={schemaLoading}
                             icon={
-                              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[var(--color-accent-yellow)]" />
+                              <Folder
+                                className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]"
+                                strokeWidth={1.75}
+                                fill="rgba(137,180,250,0.12)"
+                              />
                             }
                             label={schema}
+                            labelClassName="text-[var(--text-secondary)]"
                             onToggle={() => void handleToggleSchema(schema)}
                           />
 
                           {schemaExpanded && (
                             <div className="tree-node-enter">
-                              <SectionLabel depth={2} label="Tables" />
                               {schemaTables.map((table) => {
                                 const tableKey = nodeKey("table", schema, table.name);
                                 const tableExpanded = expanded[tableKey];
@@ -355,30 +375,38 @@ export function SchemaTree() {
                                 ];
                                 const countKey = `${schema}.${table.name}`;
                                 const count = tableCounts[countKey];
+                                const isTableActive = selectedTable === countKey;
+                                const isCollapsed = !tableExpanded;
 
                                 const tableColumns = columns[countKey] ?? [];
-                                const fkColumns = tableColumns.filter((c) => c.foreignKey);
 
                                 return (
                                   <ContextMenu key={table.name}>
                                     <ContextMenuTrigger asChild>
                                       <div>
                                         <TreeRow
-                                          depth={2}
+                                          indent={INDENT.table}
                                           expanded={tableExpanded}
                                           loading={tableLoading}
+                                          active={isTableActive}
                                           icon={
-                                            <Table2 className="h-3.5 w-3.5 shrink-0 text-[var(--color-accent-green)]" />
+                                            <Table2
+                                              className="h-[13px] w-[13px] shrink-0 text-[var(--green)]"
+                                              strokeWidth={1.75}
+                                            />
                                           }
                                           label={table.name}
+                                          labelClassName={
+                                            isCollapsed && !isTableActive
+                                              ? "text-[var(--text-muted)]"
+                                              : "text-[var(--text-primary)]"
+                                          }
                                           suffix={
                                             count !== undefined && count >= 0 ? (
-                                              <Badge
-                                                variant="secondary"
-                                                className="h-4 px-1 font-mono-db text-[9px]"
-                                              >
-                                                {count}
-                                              </Badge>
+                                              <CountBadge
+                                                count={count}
+                                                muted={isCollapsed && !isTableActive}
+                                              />
                                             ) : countLoading[countKey] ? (
                                               <Loader2 className="h-3 w-3 animate-spin" />
                                             ) : null
@@ -393,59 +421,13 @@ export function SchemaTree() {
 
                                         {tableExpanded && (
                                           <div className="tree-node-enter">
-                                            {renderColumns(
-                                              schema,
-                                              table.name,
-                                              tableColumns,
-                                              3,
-                                            )}
-
-                                            <TreeRow
-                                              depth={3}
-                                              icon={
-                                                <Hash className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
-                                              }
-                                              label="Indexes"
-                                              suffix={
-                                                <span className="text-[10px] text-[var(--color-text-muted)]">
-                                                  —
-                                                </span>
-                                              }
-                                            />
-
-                                            <TreeRow
-                                              depth={3}
-                                              expanded={expanded[nodeKey("fk", schema, table.name)]}
-                                              icon={
-                                                <Link2 className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" />
-                                              }
-                                              label="Foreign Keys"
-                                              suffix={
-                                                fkColumns.length > 0 ? (
-                                                  <Badge
-                                                    variant="outline"
-                                                    className="h-4 px-1 text-[9px]"
-                                                  >
-                                                    {fkColumns.length}
-                                                  </Badge>
-                                                ) : undefined
-                                              }
-                                              onToggle={() =>
-                                                toggleExpanded(nodeKey("fk", schema, table.name))
-                                              }
-                                            >
-                                              {expanded[nodeKey("fk", schema, table.name)] &&
-                                                fkColumns.map((col) => (
-                                                  <div
-                                                    key={col.name}
-                                                    className="font-mono-db text-[10px] text-[var(--color-text-muted)]"
-                                                    style={{ paddingLeft: `${4 * 12 + 28}px` }}
-                                                  >
-                                                    {col.name} → {col.foreignKey?.schema}.
-                                                    {col.foreignKey?.table}
-                                                  </div>
-                                                ))}
-                                            </TreeRow>
+                                            {tableColumns.map((col) => (
+                                              <ColumnRow
+                                                key={col.name}
+                                                indent={INDENT.column}
+                                                col={col}
+                                              />
+                                            ))}
                                           </div>
                                         )}
                                       </div>
@@ -486,21 +468,28 @@ export function SchemaTree() {
                               })}
 
                               <TreeRow
-                                depth={2}
-                                icon={<Eye className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />}
+                                indent={INDENT.table}
+                                icon={
+                                  <Eye className="h-3.5 w-3.5 shrink-0 text-[var(--text-ghost)]" />
+                                }
                                 label="Views"
+                                labelClassName="text-[var(--text-ghost)]"
                               />
                               <TreeRow
-                                depth={2}
+                                indent={INDENT.table}
                                 icon={
-                                  <Settings className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
+                                  <Settings className="h-3.5 w-3.5 shrink-0 text-[var(--text-ghost)]" />
                                 }
                                 label="Functions"
+                                labelClassName="text-[var(--text-ghost)]"
                               />
                               <TreeRow
-                                depth={2}
-                                icon={<List className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />}
+                                indent={INDENT.table}
+                                icon={
+                                  <List className="h-3.5 w-3.5 shrink-0 text-[var(--text-ghost)]" />
+                                }
                                 label="Sequences"
+                                labelClassName="text-[var(--text-ghost)]"
                               />
                             </div>
                           )}
@@ -516,7 +505,7 @@ export function SchemaTree() {
           {databases.length === 0 && (
             <button
               type="button"
-              className="mx-2 mt-2 flex w-[calc(100%-1rem)] items-center justify-center gap-2 rounded border border-dashed border-[var(--color-border)] py-3 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+              className="mx-2.5 mt-2 flex w-[calc(100%-20px)] items-center justify-center gap-2 rounded border border-dashed border-[var(--border)] py-3 font-mono-db text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
               onClick={() => void loadDatabases(activeConnectionId)}
             >
               <RefreshCw className="h-3.5 w-3.5" />

@@ -10,8 +10,10 @@ import { EditorState } from "@codemirror/state";
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { sql, PostgreSQL } from "@codemirror/lang-sql";
 import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
-import { bracketMatching } from "@codemirror/language";
+import { bracketMatching, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags as t } from "@lezer/highlight";
 import { useSchemaCompletionStore } from "@/stores/queryStore";
+import { useEditorCursor } from "@/components/layout/EditorCursorContext";
 
 interface QueryEditorProps {
   value: string;
@@ -24,38 +26,63 @@ export interface QueryEditorHandle {
   executeSelection: () => void;
 }
 
-const catppuccinTheme = EditorView.theme({
+const sqlHighlight = HighlightStyle.define([
+  { tag: t.keyword, color: "var(--purple)" },
+  { tag: [t.operator, t.logicOperator], color: "var(--accent)" },
+  { tag: t.string, color: "var(--green)" },
+  { tag: [t.variableName, t.propertyName, t.special(t.variableName)], color: "var(--accent)" },
+  { tag: t.name, color: "var(--text-primary)" },
+  { tag: [t.punctuation, t.separator], color: "var(--text-dim)" },
+  { tag: t.comment, color: "var(--text-ghost)", fontStyle: "italic" },
+  { tag: t.number, color: "var(--yellow)" },
+  { tag: t.bool, color: "var(--green)" },
+]);
+
+const editorTheme = EditorView.theme({
   "&": {
     height: "100%",
-    fontSize: "14px",
-    backgroundColor: "var(--color-bg-tertiary)",
-    color: "var(--color-text-primary)",
+    fontSize: "13px",
+    backgroundColor: "var(--bg-app)",
+    color: "var(--text-primary)",
   },
   ".cm-scroller": {
     fontFamily: "var(--font-mono)",
-    lineHeight: "1.6",
+    lineHeight: "22px",
+  },
+  ".cm-content": {
+    padding: "12px 18px",
+    caretColor: "var(--accent)",
   },
   ".cm-gutters": {
-    backgroundColor: "var(--color-bg-secondary)",
-    color: "var(--color-text-muted)",
-    borderRight: "1px solid var(--color-border)",
+    backgroundColor: "var(--bg-app)",
+    color: "var(--text-ghost)",
+    borderRight: "1px solid var(--border-subtle)",
+    minWidth: "42px",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    padding: "0 10px 0 0",
+    minWidth: "42px",
+    textAlign: "right",
+    fontSize: "12.5px",
   },
   ".cm-activeLine": {
     backgroundColor: "rgba(137, 180, 250, 0.06)",
   },
   ".cm-activeLineGutter": {
-    backgroundColor: "rgba(137, 180, 250, 0.1)",
-    color: "var(--color-primary)",
+    backgroundColor: "rgba(137, 180, 250, 0.05)",
+    color: "var(--text-muted)",
   },
   ".cm-cursor": {
-    borderLeftColor: "var(--color-primary)",
+    borderLeftWidth: "2px",
+    borderLeftColor: "var(--accent)",
+    marginLeft: "-1px",
   },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
     backgroundColor: "rgba(137, 180, 250, 0.2) !important",
   },
   ".cm-matchingBracket": {
     backgroundColor: "rgba(166, 227, 161, 0.15)",
-    outline: "1px solid var(--color-accent-green)",
+    outline: "1px solid var(--green)",
   },
 });
 
@@ -68,6 +95,7 @@ export const QueryEditor = forwardRef<QueryEditorHandle, QueryEditorProps>(funct
   const onChangeRef = useRef(onChange);
   const onExecuteRef = useRef(onExecute);
   const completionItems = useSchemaCompletionStore((s) => s.items);
+  const { setCursor } = useEditorCursor();
 
   onChangeRef.current = onChange;
   onExecuteRef.current = onExecute;
@@ -121,6 +149,11 @@ export const QueryEditor = forwardRef<QueryEditorHandle, QueryEditorProps>(funct
       if (update.docChanged) {
         onChangeRef.current(update.state.doc.toString());
       }
+      if (update.selectionSet || update.docChanged) {
+        const pos = update.state.selection.main.head;
+        const line = update.state.doc.lineAt(pos);
+        setCursor({ line: line.number, column: pos - line.from + 1 });
+      }
     });
 
     const startState = EditorState.create({
@@ -130,8 +163,9 @@ export const QueryEditor = forwardRef<QueryEditorHandle, QueryEditorProps>(funct
         highlightActiveLine(),
         highlightActiveLineGutter(),
         bracketMatching(),
+        syntaxHighlighting(sqlHighlight),
         sql({ dialect: PostgreSQL }),
-        catppuccinTheme,
+        editorTheme,
         executeKeymap,
         keymap.of([...defaultKeymap, ...completionKeymap, indentWithTab]),
         sqlCompletion,
@@ -148,11 +182,15 @@ export const QueryEditor = forwardRef<QueryEditorHandle, QueryEditorProps>(funct
 
     viewRef.current = view;
 
+    const pos = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(pos);
+    setCursor({ line: line.number, column: pos - line.from + 1 });
+
     return () => {
       view.destroy();
       viewRef.current = null;
     };
-  }, [readOnly]);
+  }, [readOnly, setCursor]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -166,9 +204,6 @@ export const QueryEditor = forwardRef<QueryEditorHandle, QueryEditorProps>(funct
   }, [value]);
 
   return (
-    <div
-      ref={containerRef}
-      className="h-full min-h-0 overflow-hidden bg-[var(--color-bg-tertiary)]"
-    />
+    <div ref={containerRef} className="h-full min-h-0 overflow-hidden bg-[var(--bg-app)]" />
   );
 });

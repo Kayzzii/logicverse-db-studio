@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::config::connections::{ConnectionConfig, ConnectionInput, ConnectionSummary, ConnectionsStore};
 use crate::config::query_history::{QueryHistoryEntry, QueryHistoryStore};
+use crate::config::saved_queries::{SaveQueryInput, SavedQueriesStore, SavedQuery};
 use crate::error::{AppError, AppResult};
 
 const MAX_ROWS: usize = 100_000;
@@ -24,16 +25,22 @@ pub struct DbManager {
     cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     connections_store: Arc<ConnectionsStore>,
     query_history: Arc<QueryHistoryStore>,
+    saved_queries: Arc<SavedQueriesStore>,
 }
 
 impl DbManager {
-    pub fn new(connections_store: ConnectionsStore, query_history: QueryHistoryStore) -> Self {
+    pub fn new(
+        connections_store: ConnectionsStore,
+        query_history: QueryHistoryStore,
+        saved_queries: SavedQueriesStore,
+    ) -> Self {
         Self {
             pools: Arc::new(RwLock::new(HashMap::new())),
             active_connection: Arc::new(RwLock::new(None)),
             cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             connections_store: Arc::new(connections_store),
             query_history: Arc::new(query_history),
+            saved_queries: Arc::new(saved_queries),
         }
     }
 
@@ -459,6 +466,18 @@ impl DbManager {
 
     pub async fn list_query_history(&self, limit: usize) -> AppResult<Vec<QueryHistoryEntry>> {
         self.query_history.list(limit)
+    }
+
+    pub fn list_saved_queries(&self) -> AppResult<Vec<SavedQuery>> {
+        self.saved_queries.list()
+    }
+
+    pub fn save_query(&self, input: SaveQueryInput) -> AppResult<SavedQuery> {
+        self.saved_queries.save(input)
+    }
+
+    pub fn delete_saved_query(&self, id: &str) -> AppResult<()> {
+        self.saved_queries.delete(id)
     }
 
     pub fn export_csv(result: &QueryResult) -> String {

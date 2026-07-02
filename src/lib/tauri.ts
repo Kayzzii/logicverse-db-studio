@@ -65,6 +65,25 @@ export interface QueryHistoryEntry {
   error: string | null;
 }
 
+export interface SavedQuery {
+  id: string;
+  name: string;
+  sql: string;
+  connectionId: string | null;
+  savedAt: string;
+}
+
+export interface SaveQueryInput {
+  name: string;
+  sql: string;
+  connectionId?: string;
+}
+
+export interface AppSettings {
+  theme: string;
+  maxRows: number;
+}
+
 export const tauriApi = {
   listConnections: () => invoke<ConnectionSummary[]>("list_connections"),
   saveConnection: (input: ConnectionInput) =>
@@ -92,6 +111,12 @@ export const tauriApi = {
   generateQueryId: () => invoke<string>("generate_query_id"),
   listQueryHistory: (limit = 100) =>
     invoke<QueryHistoryEntry[]>("list_query_history", { limit }),
+  listSavedQueries: () => invoke<SavedQuery[]>("list_saved_queries"),
+  saveQuery: (input: SaveQueryInput) => invoke<SavedQuery>("save_query", { input }),
+  deleteSavedQuery: (queryId: string) =>
+    invoke<void>("delete_saved_query", { queryId }),
+  getSettings: () => invoke<AppSettings>("get_settings"),
+  saveSettings: (settings: AppSettings) => invoke<void>("save_settings", { settings }),
   exportResults: (
     result: QueryResult,
     format: "csv" | "json" | "sql",

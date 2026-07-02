@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { FileText, Plus, Table2, X } from "lucide-react";
 import { useQueryStore } from "@/stores/queryStore";
 import { cn } from "@/lib/utils";
 
@@ -10,8 +9,8 @@ export function QueryTabs() {
   const addTab = useQueryStore((s) => s.addTab);
   const closeTab = useQueryStore((s) => s.closeTab);
   const setActiveTab = useQueryStore((s) => s.setActiveTab);
+  const renameTab = useQueryStore((s) => s.renameTab);
 
-  const [titleOverrides, setTitleOverrides] = useState<Record<string, string>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -25,9 +24,6 @@ export function QueryTabs() {
     }
   }, [editingId]);
 
-  const getTitle = (tabId: string, defaultTitle: string) =>
-    titleOverrides[tabId] ?? defaultTitle;
-
   const startRename = (tabId: string, currentTitle: string) => {
     setEditingId(tabId);
     setEditValue(currentTitle);
@@ -35,7 +31,7 @@ export function QueryTabs() {
 
   const commitRename = () => {
     if (editingId && editValue.trim()) {
-      setTitleOverrides((prev) => ({ ...prev, [editingId]: editValue.trim() }));
+      renameTab(editingId, editValue.trim());
     }
     setEditingId(null);
   };
@@ -46,29 +42,45 @@ export function QueryTabs() {
       return;
     }
     closeTab(tabId);
-    setTitleOverrides((prev) => {
-      const next = { ...prev };
-      delete next[tabId];
-      return next;
-    });
   };
 
+  const isTableTab = (tab: { title: string; tableView: unknown }) =>
+    !!tab.tableView || (!tab.title.toLowerCase().startsWith("query") && tab.title !== "Query");
+
   return (
-    <div className="flex h-9 shrink-0 items-end gap-0.5 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-1">
+    <div className="flex h-[34px] shrink-0 items-end overflow-x-auto border-b border-[var(--border)] bg-[var(--bg-panel)]">
       {tabs.map((tab) => {
-        const title = getTitle(tab.id, tab.title);
         const isActive = currentActive === tab.id;
+        const showTableIcon = isTableTab(tab);
 
         return (
           <div
             key={tab.id}
             className={cn(
-              "group relative flex max-w-[200px] items-center gap-1 rounded-t px-2.5 py-1.5 text-xs transition-colors",
+              "group flex h-8 max-w-[200px] items-center gap-1.5 border-t-2 px-[13px] text-xs transition-colors",
               isActive
-                ? "border border-b-0 border-[var(--color-border)] bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-[var(--color-primary)]"
-                : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)]",
+                ? "border-t-[var(--accent)] bg-[var(--bg-app)] text-[var(--text-primary)]"
+                : "border-t-transparent bg-[var(--bg-panel)] text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
             )}
           >
+            {showTableIcon ? (
+              <Table2
+                className={cn(
+                  "h-3 w-3 shrink-0",
+                  isActive ? "text-[var(--accent)]" : "text-[var(--text-ghost)]",
+                )}
+                strokeWidth={1.75}
+              />
+            ) : (
+              <FileText
+                className={cn(
+                  "h-3 w-3 shrink-0",
+                  isActive ? "text-[var(--accent)]" : "text-[var(--text-ghost)]",
+                )}
+                strokeWidth={1.75}
+              />
+            )}
+
             {editingId === tab.id ? (
               <input
                 ref={inputRef}
@@ -84,11 +96,11 @@ export function QueryTabs() {
             ) : (
               <button
                 type="button"
-                className="truncate font-mono-db"
+                className="truncate font-ui text-xs"
                 onClick={() => setActiveTab(tab.id)}
-                onDoubleClick={() => startRename(tab.id, title)}
+                onDoubleClick={() => startRename(tab.id, tab.title)}
               >
-                {title}
+                {tab.title}
                 {tab.executing && " •"}
               </button>
             )}
@@ -96,24 +108,23 @@ export function QueryTabs() {
             {(tabs.length > 1 || tab.sql.trim() !== "SELECT 1;") && (
               <button
                 type="button"
-                className="rounded p-0.5 opacity-0 transition-opacity hover:bg-[var(--color-bg-hover)] group-hover:opacity-100"
+                className="shrink-0 opacity-[0.35] transition-opacity hover:opacity-70"
                 onClick={() => handleClose(tab.id, tab.sql)}
               >
-                <X className="h-3 w-3" />
+                <X className="h-[11px] w-[11px]" strokeWidth={2} />
               </button>
             )}
           </div>
         );
       })}
 
-      <Button
-        variant="ghost"
-        size="icon"
-        className="mb-0.5 h-7 w-7 shrink-0 text-[var(--color-text-muted)]"
+      <button
+        type="button"
+        className="flex h-8 w-8 shrink-0 items-center justify-center text-[var(--text-ghost)] transition-colors hover:text-[var(--accent)]"
         onClick={() => addTab()}
       >
-        <Plus className="h-4 w-4" />
-      </Button>
+        <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+      </button>
     </div>
   );
 }

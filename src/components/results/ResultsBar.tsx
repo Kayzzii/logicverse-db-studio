@@ -1,22 +1,31 @@
 import { useState } from "react";
-import { Download, FileCode2, FileJson, FileSpreadsheet } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ResultsFilter } from "@/components/results/ResultsFilter";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { QueryResult, tauriApi } from "@/lib/tauri";
+import { TableViewState } from "@/stores/queryStore";
 import { downloadTextFile, formatDuration, formatRowCount } from "@/lib/formatters";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { cn } from "@/lib/utils";
 
 interface ResultsBarProps {
   result: QueryResult;
   filter: string;
   onFilterChange: (value: string) => void;
+  tableView?: TableViewState | null;
+  onPaginate?: (direction: "prev" | "next") => void;
+  paginating?: boolean;
 }
 
-export function ResultsBar({ result, filter, onFilterChange }: ResultsBarProps) {
+export function ResultsBar({
+  result,
+  filter,
+  onFilterChange,
+  tableView,
+  onPaginate,
+  paginating,
+}: ResultsBarProps) {
   const addToast = useSettingsStore((s) => s.addToast);
-  const [schema, setSchema] = useState("public");
-  const [table, setTable] = useState("exported_table");
+  const [schema] = useState("public");
+  const [table] = useState("exported_table");
   const [exporting, setExporting] = useState<string | null>(null);
 
   const handleExport = async (format: "csv" | "json" | "sql") => {
@@ -37,77 +46,95 @@ export function ResultsBar({ result, filter, onFilterChange }: ResultsBarProps) 
     }
   };
 
+  const canGoPrev = tableView ? tableView.offset > 0 : false;
+  const canGoNext = tableView ? result.rowCount >= tableView.pageSize : false;
+  const rangeStart = tableView ? tableView.offset + 1 : null;
+  const rangeEnd = tableView ? tableView.offset + result.rowCount : null;
+
   return (
-    <div className="flex h-8 shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2 text-[11px]">
-      <span className="shrink-0 font-mono-db text-[var(--color-text-secondary)]">
-        {formatRowCount(result.rowCount)} filas
-      </span>
-      <span className="shrink-0 text-[var(--color-text-muted)]">
-        {formatDuration(result.executionTimeMs)}
-      </span>
-      {result.truncated && (
-        <span className="shrink-0 text-[var(--color-accent-yellow)]">truncado</span>
-      )}
+    <div className="flex h-[26px] shrink-0 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-app)] px-2.5">
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 font-mono-db text-[11px] text-[var(--text-muted)]">
+          <span>{formatRowCount(result.rowCount)} rows</span>
+          <span className="text-[var(--text-ghost)]">·</span>
+          <span>{formatDuration(result.executionTimeMs)}</span>
+          {tableView && rangeStart !== null && rangeEnd !== null && (
+            <>
+              <span className="text-[var(--text-ghost)]">·</span>
+              <span>
+                {rangeStart}–{rangeEnd}
+              </span>
+            </>
+          )}
+          {result.truncated && (
+            <>
+              <span className="text-[var(--text-ghost)]">·</span>
+              <span className="text-[var(--yellow)]">truncated</span>
+            </>
+          )}
+          {filter && (
+            <>
+              <span className="text-[var(--text-ghost)]">·</span>
+              <button
+                type="button"
+                className="text-[var(--accent)] hover:underline"
+                onClick={() => onFilterChange("")}
+              >
+                clear filter
+              </button>
+            </>
+          )}
+        </div>
 
-      <span className="text-[var(--color-border)]">│</span>
-
-      <ResultsFilter
-        value={filter}
-        onChange={onFilterChange}
-        className="h-6 max-w-[180px] text-xs"
-      />
-
-      <span className="text-[var(--color-border)]">│</span>
-
-      <div className="flex items-center gap-0.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 gap-1 px-1.5 text-[10px]"
-          disabled={!!exporting}
-          onClick={() => void handleExport("csv")}
-        >
-          <FileSpreadsheet className="h-3 w-3" />
-          CSV
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 gap-1 px-1.5 text-[10px]"
-          disabled={!!exporting}
-          onClick={() => void handleExport("json")}
-        >
-          <FileJson className="h-3 w-3" />
-          JSON
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 gap-1 px-1.5 text-[10px]"
-          disabled={!!exporting}
-          onClick={() => void handleExport("sql")}
-        >
-          <FileCode2 className="h-3 w-3" />
-          SQL
-        </Button>
+        {tableView && onPaginate && (
+          <div className="flex items-center gap-[3px]">
+            <button
+              type="button"
+              disabled={!canGoPrev || paginating}
+              onClick={() => onPaginate("prev")}
+              className={cn(
+                "flex h-[17px] items-center gap-0.5 rounded-[2px] border border-[var(--border-strong)] bg-transparent px-[7px] font-ui text-[9.5px] text-[var(--text-muted)] transition-colors",
+                "hover:border-[rgba(255,255,255,0.14)] hover:text-[var(--text-primary)]",
+                (!canGoPrev || paginating) && "cursor-not-allowed opacity-40",
+              )}
+            >
+              <ChevronLeft className="h-3 w-3" />
+              Prev
+            </button>
+            <button
+              type="button"
+              disabled={!canGoNext || paginating}
+              onClick={() => onPaginate("next")}
+              className={cn(
+                "flex h-[17px] items-center gap-0.5 rounded-[2px] border border-[var(--border-strong)] bg-transparent px-[7px] font-ui text-[9.5px] text-[var(--text-muted)] transition-colors",
+                "hover:border-[rgba(255,255,255,0.14)] hover:text-[var(--text-primary)]",
+                (!canGoNext || paginating) && "cursor-not-allowed opacity-40",
+              )}
+            >
+              Next
+              <ChevronRight className="h-3 w-3" />
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="ml-auto flex items-center gap-1.5">
-        <span className="text-[var(--color-text-muted)]">Schema:</span>
-        <Input
-          value={schema}
-          onChange={(e) => setSchema(e.target.value)}
-          className="h-6 w-20 border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-1.5 font-mono-db text-[10px]"
-        />
-        <span className="text-[var(--color-text-muted)]">Tabla:</span>
-        <Input
-          value={table}
-          onChange={(e) => setTable(e.target.value)}
-          className="h-6 w-24 border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-1.5 font-mono-db text-[10px]"
-        />
+      <div className="flex items-center gap-[3px]">
+        {(["csv", "json", "sql"] as const).map((fmt) => (
+          <button
+            key={fmt}
+            type="button"
+            disabled={!!exporting}
+            onClick={() => void handleExport(fmt)}
+            className={cn(
+              "flex h-[17px] items-center rounded-[2px] border border-[var(--border-strong)] bg-transparent px-[7px] font-ui text-[9.5px] tracking-[0.3px] text-[var(--text-muted)] uppercase transition-colors",
+              "hover:border-[rgba(255,255,255,0.14)] hover:text-[var(--text-primary)]",
+              exporting === fmt && "opacity-50",
+            )}
+          >
+            {fmt}
+          </button>
+        ))}
       </div>
-
-      {exporting && <Download className="h-3 w-3 animate-pulse text-[var(--color-text-muted)]" />}
     </div>
   );
 }

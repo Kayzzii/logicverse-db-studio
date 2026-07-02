@@ -42,13 +42,24 @@ function categorizePgType(type: string): DataTypeCategory {
 
 const LABELS: Record<DataTypeCategory, string> = {
   number: "123",
-  text: "A-Z",
+  text: "A–Z",
   boolean: "☑",
   date: "📅",
   json: "{}",
   uuid: "🔗",
   binary: "B",
   unknown: "?",
+};
+
+const BADGE_STYLES: Record<DataTypeCategory, string> = {
+  number: "bg-[rgba(137,180,250,0.12)] text-[var(--accent)]",
+  text: "bg-[rgba(203,166,247,0.12)] text-[var(--purple)]",
+  boolean: "bg-[rgba(166,227,161,0.12)] text-[var(--green)]",
+  date: "bg-[rgba(249,226,175,0.12)] text-[var(--yellow)]",
+  json: "bg-[rgba(203,166,247,0.12)] text-[var(--purple)]",
+  uuid: "bg-[rgba(137,180,250,0.12)] text-[var(--accent)]",
+  binary: "bg-[rgba(255,255,255,0.06)] text-[var(--text-muted)]",
+  unknown: "bg-[rgba(255,255,255,0.06)] text-[var(--text-muted)]",
 };
 
 interface DataTypeIconProps {
@@ -64,7 +75,8 @@ export function DataTypeIcon({ type, className, showLabel = true }: DataTypeIcon
   return (
     <span
       className={cn(
-        "inline-flex min-w-[1.25rem] items-center justify-center rounded px-0.5 font-mono-db text-[10px] font-medium text-[var(--color-text-muted)]",
+        "inline-flex shrink-0 items-center justify-center rounded-[2px] px-1 py-px font-ui text-[8.5px] font-semibold",
+        BADGE_STYLES[category],
         className,
       )}
       title={type}

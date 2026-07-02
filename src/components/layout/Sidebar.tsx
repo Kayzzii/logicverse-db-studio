@@ -2,9 +2,9 @@ import { SchemaTree } from "@/components/schema/SchemaTree";
 
 export function Sidebar() {
   return (
-    <aside className="flex h-full flex-col bg-[var(--color-bg-secondary)]">
-      <div className="border-b border-[var(--color-border)] px-3 py-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+    <aside className="flex h-full w-[240px] flex-col bg-[var(--bg-panel)]">
+      <div className="shrink-0 px-2.5 pb-2 pt-2.5">
+        <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.9px] text-[var(--text-dim)]">
           Database Navigator
         </h2>
       </div>

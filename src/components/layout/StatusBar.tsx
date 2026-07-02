@@ -3,6 +3,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { formatDuration, formatRowCount } from "@/lib/formatters";
 import { tauriApi } from "@/lib/tauri";
+import { useEditorCursor } from "@/components/layout/EditorCursorContext";
 
 export function StatusBar() {
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId);
@@ -10,6 +11,7 @@ export function StatusBar() {
   const tabs = useQueryStore((s) => s.tabs);
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const [serverVersion, setServerVersion] = useState<string | null>(null);
+  const { cursor } = useEditorCursor();
 
   const activeConnection = connections.find((c) => c.id === activeConnectionId);
   const currentTab = tabs.find((t) => t.id === (activeTabId ?? tabs[0]?.id));
@@ -44,31 +46,43 @@ export function StatusBar() {
     };
   }, [activeConnectionId]);
 
+  const statsText =
+    currentTab?.result && !currentTab.executing
+      ? `${formatRowCount(currentTab.result.rowCount)} rows · ${formatDuration(currentTab.result.executionTimeMs)}`
+      : currentTab?.executing
+        ? "Ejecutando…"
+        : null;
+
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 font-mono-db text-[11px] text-[var(--color-text-muted)]">
-      <div className="flex items-center gap-3">
-        <span>
+    <footer className="flex h-[22px] shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--bg-panel)] px-3 font-mono-db text-[11px]">
+      <div className="flex items-center">
+        <span className="text-[var(--text-dim)]">
           {activeConnection
             ? `${activeConnection.host}:${activeConnection.port}/${activeConnection.database}`
             : "Desconectado"}
         </span>
+
         {serverVersion && (
           <>
-            <span className="text-[var(--color-border)]">│</span>
-            <span>{serverVersion}</span>
+            <span className="mx-2 text-[#313244]">|</span>
+            <span className="text-[var(--text-dim)]">{serverVersion}</span>
           </>
         )}
+
+        {statsText && (
+          <>
+            <span className="mx-2 text-[#313244]">|</span>
+            <span className="text-[var(--green)]">{statsText}</span>
+          </>
+        )}
+
+        <span className="mx-2 text-[#313244]">|</span>
+        <span className="text-[var(--text-dim)]">UTF-8</span>
       </div>
 
-      <div className="flex items-center gap-3">
-        {currentTab?.executing && <span className="text-[var(--color-primary)]">Ejecutando…</span>}
-        {currentTab?.result && (
-          <>
-            <span>{formatRowCount(currentTab.result.rowCount)} filas</span>
-            <span>{formatDuration(currentTab.result.executionTimeMs)}</span>
-          </>
-        )}
-      </div>
+      <span className="text-[var(--text-dim)]">
+        Ln {cursor.line}, Col {cursor.column}
+      </span>
     </footer>
   );
 }

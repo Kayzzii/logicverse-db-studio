@@ -1,5 +1,4 @@
 import { Search, X } from "lucide-react";
-import { Input } from "@/components/ui/input";
 
 interface SchemaSearchProps {
   value: string;
@@ -8,22 +7,26 @@ interface SchemaSearchProps {
 
 export function SchemaSearch({ value, onChange }: SchemaSearchProps) {
   return (
-    <div className="border-b border-[var(--color-border)] px-2 py-2">
+    <div className="shrink-0 px-2.5 pb-2">
       <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
-        <Input
+        <Search
+          className="pointer-events-none absolute left-2 top-1/2 h-[11px] w-[11px] -translate-y-1/2 text-[var(--text-ghost)]"
+          strokeWidth={2}
+        />
+        <input
+          type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Filtrar objetos…"
-          className="h-8 border-[var(--color-border)] bg-[var(--color-bg-tertiary)] pl-8 pr-8 font-mono-db text-xs placeholder:text-[var(--color-text-muted)]"
+          placeholder="Search..."
+          className="w-full rounded-[3px] border border-[var(--border-strong)] bg-[var(--bg-deep)] py-[5px] pl-7 pr-7 font-mono-db text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-ghost)] focus:border-[var(--accent)]/40"
         />
         {value && (
           <button
             type="button"
             onClick={() => onChange("")}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-ghost)] hover:text-[var(--text-muted)]"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-3 w-3" />
           </button>
         )}
       </div>

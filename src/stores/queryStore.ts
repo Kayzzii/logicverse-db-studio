@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import { ColumnInfo, QueryResult, tauriApi } from "@/lib/tauri";
 
+export interface TableViewState {
+  schema: string;
+  table: string;
+  offset: number;
+  pageSize: number;
+}
+
 export interface QueryTab {
   id: string;
   title: string;
@@ -9,6 +16,7 @@ export interface QueryTab {
   result: QueryResult | null;
   error: string | null;
   executing: boolean;
+  tableView: TableViewState | null;
 }
 
 interface QueryState {
@@ -18,100 +26,196 @@ interface QueryState {
   addTab: (sql?: string, title?: string) => void;
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
+  renameTab: (id: string, title: string) => void;
   updateTabSql: (id: string, sql: string) => void;
+  loadSqlIntoActiveTab: (sql: string, title?: string) => void;
   executeTab: (id: string, sql: string, connectionId: string) => Promise<void>;
   cancelTab: (id: string) => Promise<void>;
   setTabResult: (id: string, result: QueryResult | null, error?: string | null) => void;
+  openTableView: (schema: string, table: string, connectionId: string) => Promise<void>;
+  paginateTableView: (
+    tabId: string,
+    direction: "prev" | "next",
+    connectionId: string,
+  ) => Promise<void>;
 }
 
+let tabCounter = 1;
+
 function createTab(sql = "SELECT 1;", title?: string): QueryTab {
+  const defaultTitle = title ?? `Query ${tabCounter++}`;
   return {
     id: crypto.randomUUID(),
-    title: title ?? "Query",
+    title: defaultTitle,
     sql,
     queryId: null,
     result: null,
     error: null,
     executing: false,
+    tableView: null,
   };
 }
 
-export const useQueryStore = create<QueryState>((set, get) => ({
-  tabs: [createTab()],
-  activeTabId: null,
-  historyRefreshKey: 0,
+function buildTableSql(schema: string, table: string, offset: number, pageSize: number): string {
+  return `SELECT * FROM "${schema}"."${table}" LIMIT ${pageSize} OFFSET ${offset};`;
+}
 
-  addTab: (sql, title) => {
-    const tab = createTab(sql, title);
-    set((state) => ({
-      tabs: [...state.tabs, tab],
-      activeTabId: tab.id,
-    }));
-  },
+export const useQueryStore = create<QueryState>((set, get) => {
+  const initialTab = createTab();
 
-  closeTab: (id) => {
-    set((state) => {
-      const tabs = state.tabs.filter((t) => t.id !== id);
-      const activeTabId =
-        state.activeTabId === id
-          ? tabs[tabs.length - 1]?.id ?? null
-          : state.activeTabId;
-      return { tabs: tabs.length > 0 ? tabs : [createTab()], activeTabId };
-    });
-  },
+  return {
+    tabs: [initialTab],
+    activeTabId: initialTab.id,
+    historyRefreshKey: 0,
 
-  setActiveTab: (id) => set({ activeTabId: id }),
+    addTab: (sql, title) => {
+      const tab = createTab(sql, title);
+      set((state) => ({
+        tabs: [...state.tabs, tab],
+        activeTabId: tab.id,
+      }));
+    },
 
-  updateTabSql: (id, sql) => {
-    set((state) => ({
-      tabs: state.tabs.map((tab) => (tab.id === id ? { ...tab, sql } : tab)),
-    }));
-  },
+    closeTab: (id) => {
+      set((state) => {
+        const tabs = state.tabs.filter((t) => t.id !== id);
+        const activeTabId =
+          state.activeTabId === id
+            ? tabs[tabs.length - 1]?.id ?? null
+            : state.activeTabId;
+        if (tabs.length === 0) {
+          const fresh = createTab();
+          return { tabs: [fresh], activeTabId: fresh.id };
+        }
+        return { tabs, activeTabId };
+      });
+    },
 
-  executeTab: async (id, sql, connectionId) => {
-    const queryId = await tauriApi.generateQueryId();
-    set((state) => ({
-      tabs: state.tabs.map((tab) =>
-        tab.id === id
-          ? { ...tab, executing: true, queryId, error: null, result: null }
-          : tab,
-      ),
-    }));
+    setActiveTab: (id) => set({ activeTabId: id }),
 
-    try {
-      const result = await tauriApi.executeQuery(connectionId, queryId, sql);
-      get().setTabResult(id, result);
-    } catch (error) {
-      get().setTabResult(
-        id,
-        null,
-        error instanceof Error ? error.message : String(error),
-      );
-    } finally {
-      set((state) => ({ historyRefreshKey: state.historyRefreshKey + 1 }));
-    }
-  },
+    renameTab: (id, title) => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      set((state) => ({
+        tabs: state.tabs.map((tab) => (tab.id === id ? { ...tab, title: trimmed } : tab)),
+      }));
+    },
 
-  cancelTab: async (id) => {
-    const tab = get().tabs.find((t) => t.id === id);
-    if (!tab?.queryId) return;
-    try {
-      await tauriApi.cancelQuery(tab.queryId);
-    } catch {
-      // Query may have already finished
-    }
-  },
+    updateTabSql: (id, sql) => {
+      set((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.id === id ? { ...tab, sql, tableView: null } : tab,
+        ),
+      }));
+    },
 
-  setTabResult: (id, result, error = null) => {
-    set((state) => ({
-      tabs: state.tabs.map((tab) =>
-        tab.id === id
-          ? { ...tab, result, error, executing: false, queryId: null }
-          : tab,
-      ),
-    }));
-  },
-}));
+    loadSqlIntoActiveTab: (sql, title) => {
+      const activeId = get().activeTabId ?? get().tabs[0]?.id;
+      if (!activeId) return;
+      set((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.id === activeId
+            ? {
+                ...tab,
+                sql,
+                title: title ?? tab.title,
+                tableView: null,
+                result: null,
+                error: null,
+              }
+            : tab,
+        ),
+      }));
+    },
+
+    executeTab: async (id, sql, connectionId) => {
+      const queryId = await tauriApi.generateQueryId();
+      set((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.id === id
+            ? { ...tab, executing: true, queryId, error: null, result: null, sql }
+            : tab,
+        ),
+      }));
+
+      try {
+        const result = await tauriApi.executeQuery(connectionId, queryId, sql);
+        get().setTabResult(id, result);
+      } catch (error) {
+        get().setTabResult(
+          id,
+          null,
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        set((state) => ({ historyRefreshKey: state.historyRefreshKey + 1 }));
+      }
+    },
+
+    cancelTab: async (id) => {
+      const tab = get().tabs.find((t) => t.id === id);
+      if (!tab?.queryId) return;
+      try {
+        await tauriApi.cancelQuery(tab.queryId);
+      } catch {
+        // Query may have already finished
+      }
+    },
+
+    setTabResult: (id, result, error = null) => {
+      set((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.id === id
+            ? { ...tab, result, error, executing: false, queryId: null }
+            : tab,
+        ),
+      }));
+    },
+
+    openTableView: async (schema, table, connectionId) => {
+      const pageSize = 100;
+      const offset = 0;
+      const sql = buildTableSql(schema, table, offset, pageSize);
+      const tab = createTab(sql, table);
+      tab.tableView = { schema, table, offset, pageSize };
+
+      set((state) => ({
+        tabs: [...state.tabs, tab],
+        activeTabId: tab.id,
+      }));
+
+      await get().executeTab(tab.id, sql, connectionId);
+    },
+
+    paginateTableView: async (tabId, direction, connectionId) => {
+      const tab = get().tabs.find((t) => t.id === tabId);
+      if (!tab?.tableView) return;
+
+      const { schema, table, offset, pageSize } = tab.tableView;
+      const newOffset =
+        direction === "next"
+          ? offset + pageSize
+          : Math.max(0, offset - pageSize);
+
+      if (newOffset === offset) return;
+
+      const sql = buildTableSql(schema, table, newOffset, pageSize);
+      set((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === tabId
+            ? {
+                ...t,
+                sql,
+                tableView: { schema, table, offset: newOffset, pageSize },
+              }
+            : t,
+        ),
+      }));
+
+      await get().executeTab(tabId, sql, connectionId);
+    },
+  };
+});
 
 export interface SchemaCompletionItem {
   label: string;

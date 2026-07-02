@@ -1,12 +1,6 @@
-import {
-  AlignLeft,
-  Play,
-  ScanSearch,
-  Square,
-  TextSelect,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Kbd } from "@/components/shared/Kbd";
+import { useState } from "react";
+import { Bookmark, Play, Square, TextSelect } from "lucide-react";
+import { SavedQueriesDialog } from "@/components/editor/SavedQueriesDialog";
 import { cn } from "@/lib/utils";
 
 interface EditorToolbarProps {
@@ -14,6 +8,42 @@ interface EditorToolbarProps {
   onExecute: () => void;
   onExecuteSelection: () => void;
   onCancel: () => void;
+  onSave: () => void;
+}
+
+function ToolbarButton({
+  children,
+  onClick,
+  disabled,
+  variant = "default",
+  className,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  variant?: "run" | "default" | "ghost";
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "flex h-[22px] items-center gap-1.5 rounded-[3px] px-[9px] font-ui text-[11px] font-medium transition-colors",
+        variant === "run" &&
+          "border border-[rgba(166,227,161,0.28)] bg-[rgba(166,227,161,0.12)] text-[var(--green)] hover:bg-[rgba(166,227,161,0.18)]",
+        variant === "default" &&
+          "border border-[var(--border-strong)] bg-transparent text-[var(--text-secondary)] hover:border-[rgba(255,255,255,0.14)] hover:text-[var(--text-primary)]",
+        variant === "ghost" &&
+          "cursor-not-allowed border border-transparent bg-transparent text-[var(--text-ghost)]",
+        disabled && variant !== "ghost" && "opacity-50",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
 export function EditorToolbar({
@@ -21,68 +51,55 @@ export function EditorToolbar({
   onExecute,
   onExecuteSelection,
   onCancel,
+  onSave,
 }: EditorToolbarProps) {
+  const [savedOpen, setSavedOpen] = useState(false);
+
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2">
-      <Button
-        size="sm"
-        disabled={executing}
-        onClick={onExecute}
-        className={cn(
-          "h-7 gap-1.5 bg-[var(--color-accent-green)] px-2.5 text-xs font-medium text-[var(--color-bg-tertiary)] hover:bg-[var(--color-accent-green)]/90",
+    <>
+      <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-[var(--border)] bg-[var(--bg-panel)] px-2">
+        <ToolbarButton variant="run" disabled={executing} onClick={onExecute}>
+          <Play className="h-[9px] w-[9px] fill-[var(--green)] text-[var(--green)]" />
+          Run
+        </ToolbarButton>
+
+        {executing && (
+          <ToolbarButton variant="default" onClick={onCancel}>
+            <Square className="h-3 w-3" />
+            Cancel
+          </ToolbarButton>
         )}
-      >
-        <Play className="h-3.5 w-3.5 fill-current" />
-        Ejecutar
-      </Button>
 
-      {executing && (
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={onCancel}>
-          <Square className="h-3.5 w-3.5" />
-          Cancelar
-        </Button>
-      )}
+        <ToolbarButton variant="default" disabled={executing} onClick={onExecuteSelection}>
+          <TextSelect className="h-3 w-3" strokeWidth={1.75} />
+          Selection
+        </ToolbarButton>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 gap-1.5 px-2 text-xs text-[var(--color-text-secondary)]"
-        disabled={executing}
-        onClick={onExecuteSelection}
-      >
-        <TextSelect className="h-3.5 w-3.5" />
-        Selección
-      </Button>
+        <div className="mx-0.5 h-[14px] w-px bg-[rgba(255,255,255,0.08)]" />
 
-      <div className="mx-1 h-4 w-px bg-[var(--color-border)]" />
+        <ToolbarButton variant="default" disabled={executing} onClick={onSave}>
+          Save
+        </ToolbarButton>
+        <ToolbarButton variant="default" disabled={executing} onClick={() => setSavedOpen(true)}>
+          <Bookmark className="h-3 w-3" strokeWidth={1.75} />
+          Saved
+        </ToolbarButton>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 gap-1.5 px-2 text-xs text-[var(--color-text-muted)]"
-        disabled
-        title="Próximamente"
-      >
-        <AlignLeft className="h-3.5 w-3.5" />
-        Formatear
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 gap-1.5 px-2 text-xs text-[var(--color-text-muted)]"
-        disabled
-        title="Próximamente"
-      >
-        <ScanSearch className="h-3.5 w-3.5" />
-        Explain
-      </Button>
+        <div className="mx-0.5 h-[14px] w-px bg-[rgba(255,255,255,0.08)]" />
 
-      <div className="ml-auto flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
-        <Kbd>Ctrl</Kbd>
-        <span>+</span>
-        <Kbd>Enter</Kbd>
-        <span className="ml-1 hidden sm:inline">para ejecutar</span>
+        <ToolbarButton variant="ghost" disabled>
+          Format
+        </ToolbarButton>
+        <ToolbarButton variant="ghost" disabled>
+          Explain
+        </ToolbarButton>
+
+        <span className="ml-auto font-mono-db text-[11px] tracking-[0.2px] text-[var(--text-ghost)]">
+          Ctrl+Enter
+        </span>
       </div>
-    </div>
+
+      <SavedQueriesDialog open={savedOpen} onOpenChange={setSavedOpen} />
+    </>
   );
 }
