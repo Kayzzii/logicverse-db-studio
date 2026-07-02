@@ -1,0 +1,171 @@
+# Prompt para Cursor — LogicVerse DB Studio
+
+## Contexto del proyecto
+
+Soy Kayzzii (GitHub: Kayzzii), fundador de LogicVerse. Quiero construir **LogicVerse DB Studio**, un gestor de bases de datos liviano, rápido y seguro — una alternativa moderna a DBeaver sin la pesadez de Eclipse/Java.
+
+El producto debe ser un app de escritorio usando **Tauri 2 (Rust backend) + React + TypeScript** en el frontend. El objetivo es que el binario final pese menos de 50MB y arranque en menos de 2 segundos.
+
+---
+
+## Stack técnico obligatorio
+
+- **Desktop framework:** Tauri v2 (Rust)
+- **Frontend:** React 18+ con TypeScript
+- **Styling:** Tailwind CSS + shadcn/ui como sistema de componentes
+- **Query editor:** CodeMirror 6 con extensión SQL (autocompletado, syntax highlighting)
+- **Backend DB connections:** `sqlx` en Rust (async, soporte PostgreSQL como prioridad)
+- **State management:** Zustand
+- **Comunicación frontend-backend:** Tauri commands (invoke) vía IPC
+- **Almacenamiento local de configuración:** SQLite local vía Tauri plugin o archivo JSON cifrado para credenciales
+
+---
+
+## Arquitectura del proyecto
+
+```
+logicverse-db-studio/
+├── src-tauri/              # Backend Rust
+│   ├── src/
+│   │   ├── main.rs
+│   │   ├── db/
+│   │   │   ├── mod.rs
+│   │   │   ├── connection.rs    # Pool manager, connect/disconnect
+│   │   │   ├── query.rs         # Ejecutar queries, cancelar queries
+│   │   │   ├── schema.rs        # Introspección: listar DBs, schemas, tablas, columnas, indexes, FK
+│   │   │   └── export.rs        # Exportar resultados a CSV, JSON, SQL
+│   │   ├── config/
+│   │   │   ├── mod.rs
+│   │   │   ├── connections.rs   # CRUD de conexiones guardadas (cifradas)
+│   │   │   └── settings.rs      # Preferencias del usuario
+│   │   └── security/
+│   │       ├── mod.rs
+│   │       └── crypto.rs        # Cifrado AES-256 para credenciales almacenadas
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+├── src/                    # Frontend React
+│   ├── App.tsx
+│   ├── main.tsx
+│   ├── components/
+│   │   ├── layout/
+│   │   │   ├── Sidebar.tsx          # Panel izquierdo: conexiones + schema tree
+│   │   │   ├── MainPanel.tsx        # Área principal con tabs
+│   │   │   ├── StatusBar.tsx        # Barra inferior: conexión activa, tiempo de query, filas
+│   │   │   └── TopBar.tsx           # Barra superior: acciones globales
+│   │   ├── connections/
+│   │   │   ├── ConnectionList.tsx   # Lista de conexiones guardadas
+│   │   │   ├── ConnectionForm.tsx   # Formulario crear/editar conexión
+│   │   │   └── ConnectionTest.tsx   # Test de conexión con feedback visual
+│   │   ├── schema/
+│   │   │   ├── SchemaTree.tsx       # Árbol: DB > Schema > Tables > Columns
+│   │   │   ├── TableInfo.tsx        # Detalle de tabla: columnas, tipos, indexes, FK
+│   │   │   └── SchemaSearch.tsx     # Buscar tablas/columnas rápido
+│   │   ├── editor/
+│   │   │   ├── QueryEditor.tsx      # CodeMirror 6 con SQL
+│   │   │   ├── QueryTabs.tsx        # Múltiples tabs de queries
+│   │   │   ├── QueryHistory.tsx     # Historial de queries ejecutadas
+│   │   │   └── SavedQueries.tsx     # Queries guardadas por el usuario
+│   │   ├── results/
+│   │   │   ├── ResultsTable.tsx     # Tabla virtualizada (TanStack Table) para miles de filas
+│   │   │   ├── ResultsExport.tsx    # Botones exportar CSV/JSON/SQL
+│   │   │   └── ResultsFilter.tsx    # Filtro/buscar en resultados
+│   │   └── shared/
+│   │       ├── Modal.tsx
+│   │       ├── Toast.tsx
+│   │       └── Kbd.tsx              # Mostrar atajos de teclado
+│   ├── stores/
+│   │   ├── connectionStore.ts
+│   │   ├── queryStore.ts
+│   │   ├── schemaStore.ts
+│   │   └── settingsStore.ts
+│   ├── hooks/
+│   │   ├── useConnection.ts
+│   │   ├── useQuery.ts
+│   │   └── useSchema.ts
+│   └── lib/
+│       ├── tauri.ts             # Wrappers tipados para invoke()
+│       └── formatters.ts        # Formateo de datos, fechas, tamaños
+├── package.json
+├── tsconfig.json
+├── tailwind.config.js
+└── README.md
+```
+
+---
+
+## Features a implementar (en orden de prioridad)
+
+### Fase 1 — Core (hacer primero)
+1. **Connection Manager** — crear, editar, eliminar, testear conexiones PostgreSQL. Guardar credenciales cifradas con AES-256 en disco local.
+2. **Schema Browser** — árbol lateral navegable: databases → schemas → tables → columns (mostrar tipo, nullable, PK, FK). Lazy loading por nivel.
+3. **Query Editor** — CodeMirror 6 con syntax highlighting SQL, autocompletado básico de tablas/columnas de la conexión activa, ejecutar con Ctrl+Enter, ejecutar selección, cancelar query en ejecución.
+4. **Results Viewer** — tabla virtualizada (manejar 100k+ filas sin lag), ordenar por columna, copiar celda/fila, mostrar tiempo de ejecución y cantidad de filas.
+5. **Export** — exportar resultados a CSV, JSON, INSERT statements.
+
+### Fase 2 — Productividad
+6. **Múltiples tabs** de queries simultáneas, cada una con su resultado.
+7. **Query history** — historial automático de todas las queries ejecutadas con timestamp.
+8. **Saved queries** — guardar queries con nombre para reusar.
+9. **Table data viewer** — click derecho en tabla → "View Data" abre SELECT * con paginación.
+10. **Dark/Light theme** toggle.
+
+### Fase 3 — Avanzado
+11. **Soporte multi-motor** — agregar MySQL y SQLite además de PostgreSQL (abstraer la capa de conexión en Rust).
+12. **ER Diagram viewer** — visualización básica de relaciones entre tablas.
+13. **SSH Tunnel** — conectar a DBs remotas vía SSH tunnel integrado.
+14. **Explain/Analyze** — botón para ejecutar EXPLAIN ANALYZE y mostrar el query plan visual.
+
+---
+
+## Requerimientos técnicos críticos
+
+### Performance
+- La app debe arrancar en < 2 segundos
+- El schema tree debe cargar con lazy loading (no traer todo el schema de golpe)
+- La tabla de resultados debe ser virtualizada — no renderizar más de lo visible
+- Las queries deben ejecutarse async y ser cancelables
+
+### Seguridad
+- Las credenciales NUNCA se guardan en texto plano
+- Usar cifrado AES-256-GCM con una clave derivada de la máquina (machine-specific key vía Tauri)
+- No exponer el connection string en logs ni en el frontend
+- Sanitizar inputs — no concatenar SQL desde el frontend
+
+### UX
+- Atajos de teclado para todo: Ctrl+Enter (ejecutar), Ctrl+S (guardar query), Ctrl+N (nueva tab), Ctrl+W (cerrar tab)
+- Feedback visual inmediato: loading spinners, toasts de éxito/error, tiempo de query
+- Sidebar colapsable para maximizar espacio del editor
+- Layout responsive que funcione bien en pantallas de 13" a 27"
+
+---
+
+## Convenciones de código
+
+- TypeScript estricto (`strict: true`)
+- Rust: usar `thiserror` para errores tipados, `serde` para serialización
+- Componentes React funcionales, nunca clases
+- Nombres de archivos en PascalCase para componentes, camelCase para utils/hooks
+- Cada Tauri command debe tener tipado TypeScript correspondiente en `lib/tauri.ts`
+- Commits convencionales: `feat:`, `fix:`, `refactor:`, `docs:`
+
+---
+
+## Branding
+
+- Nombre: **LogicVerse DB Studio**
+- Autor: **Kayzzii** / **LogicVerse**
+- Repo: `github.com/Kayzzii/logicverse-db-studio`
+- License: MIT
+- El README debe incluir badges, screenshots placeholder, instrucciones de instalación y desarrollo
+
+---
+
+## Instrucciones para el agente
+
+1. Empezá creando el proyecto Tauri 2 + React + TypeScript desde cero
+2. Configurá Tailwind + shadcn/ui
+3. Implementá la Fase 1 completa antes de avanzar
+4. Cada feature debe compilar y funcionar antes de pasar a la siguiente
+5. Escribí el código Rust y TypeScript completo — no dejes placeholders ni TODOs
+6. Si necesitás tomar una decisión de diseño, elegí la opción más simple y performante
+7. Comentá las partes complejas del código, especialmente la comunicación IPC entre Rust y React
