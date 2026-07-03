@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { QueryTab } from "@/stores/queryStore";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ResultsTable } from "@/components/results/ResultsTable";
 import { ResultsBar } from "@/components/results/ResultsBar";
 import { QueryHistory } from "@/components/editor/QueryHistory";
+import { ExplainPlan } from "@/components/editor/ExplainPlan";
 import { formatDuration } from "@/lib/formatters";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
+import { useUiStore } from "@/stores/uiStore";
 import { cn } from "@/lib/utils";
 
 interface ResultsPanelProps {
@@ -15,19 +17,44 @@ interface ResultsPanelProps {
 
 export function ResultsPanel({ tab }: ResultsPanelProps) {
   const [filter, setFilter] = useState("");
+  const [activeSubTab, setActiveSubTab] = useState("results");
+  const queryHistoryOpen = useUiStore((s) => s.queryHistoryOpen);
+  const setQueryHistoryOpen = useUiStore((s) => s.setQueryHistoryOpen);
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId);
+  const connections = useConnectionStore((s) => s.connections);
   const paginateTableView = useQueryStore((s) => s.paginateTableView);
   const hasResult = !!tab.result;
   const hasMessage = !!tab.error || (tab.result?.affectedRows != null && tab.result.rowCount <= 1);
+  const hasExplain = !!tab.explainResult || !!tab.explainError;
+
+  const activeConnection = connections.find((c) => c.id === activeConnectionId);
+  const driver = activeConnection?.driver ?? "postgres";
+
+  useEffect(() => {
+    if (tab.explainResult || tab.explainError) {
+      setActiveSubTab("messages");
+    }
+  }, [tab.explainResult, tab.explainError]);
+
+  useEffect(() => {
+    if (queryHistoryOpen) {
+      setActiveSubTab("history");
+      setQueryHistoryOpen(false);
+    }
+  }, [queryHistoryOpen, setQueryHistoryOpen]);
 
   const handlePaginate = (direction: "prev" | "next") => {
     if (!activeConnectionId) return;
-    void paginateTableView(tab.id, direction, activeConnectionId);
+    void paginateTableView(tab.id, direction, activeConnectionId, driver);
   };
 
   return (
     <div className="flex h-full flex-col bg-[var(--bg-app)]">
-      <Tabs defaultValue="results" className="flex h-full flex-col">
+      <Tabs
+        value={activeSubTab}
+        onValueChange={setActiveSubTab}
+        className="flex h-full flex-col"
+      >
         <div className="flex h-[30px] shrink-0 items-end border-b border-[var(--border)] bg-[var(--bg-panel)] px-2">
           <TabsList className="h-full gap-0 bg-transparent p-0">
             <TabsTrigger
@@ -54,7 +81,7 @@ export function ResultsPanel({ tab }: ResultsPanelProps) {
               )}
             >
               Messages
-              {(tab.error || hasMessage) && (
+              {(tab.error || hasMessage || hasExplain) && (
                 <span className="ml-1.5 h-1.5 w-1.5 rounded-full bg-[var(--yellow)]" />
               )}
             </TabsTrigger>
@@ -93,13 +120,25 @@ export function ResultsPanel({ tab }: ResultsPanelProps) {
           )}
         </TabsContent>
 
-        <TabsContent value="messages" className="mt-0 min-h-0 flex-1 overflow-auto p-3">
+        <TabsContent value="messages" className="mt-0 min-h-0 flex-1 overflow-auto">
+          {tab.explainResult && (
+            <ExplainPlan
+              root={tab.explainResult.root}
+              driver={tab.explainResult.driver}
+              executionTimeMs={tab.explainResult.executionTimeMs}
+            />
+          )}
+          {tab.explainError && (
+            <pre className="m-3 whitespace-pre-wrap rounded border border-[rgba(243,139,168,0.3)] bg-[rgba(243,139,168,0.1)] p-3 font-mono-db text-xs text-[var(--red)]">
+              EXPLAIN error: {tab.explainError}
+            </pre>
+          )}
           {tab.error ? (
-            <pre className="whitespace-pre-wrap rounded border border-[rgba(243,139,168,0.3)] bg-[rgba(243,139,168,0.1)] p-3 font-mono-db text-xs text-[var(--red)]">
+            <pre className="m-3 whitespace-pre-wrap rounded border border-[rgba(243,139,168,0.3)] bg-[rgba(243,139,168,0.1)] p-3 font-mono-db text-xs text-[var(--red)]">
               {tab.error}
             </pre>
           ) : tab.result?.affectedRows != null ? (
-            <div className="font-mono-db text-xs text-[var(--text-secondary)]">
+            <div className="p-3 font-mono-db text-xs text-[var(--text-secondary)]">
               <p className="text-[var(--green)]">Query ejecutada correctamente.</p>
               <p className="mt-2">
                 {tab.result.affectedRows} fila(s) afectada(s) ·{" "}
@@ -109,9 +148,9 @@ export function ResultsPanel({ tab }: ResultsPanelProps) {
                 <p className="mt-1 text-[var(--text-muted)]">{tab.result.rows[0][0]}</p>
               )}
             </div>
-          ) : (
-            <p className="font-mono-db text-xs text-[var(--text-muted)]">Sin mensajes</p>
-          )}
+          ) : !tab.explainResult && !tab.explainError ? (
+            <p className="p-3 font-mono-db text-xs text-[var(--text-muted)]">Sin mensajes</p>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="history" className="mt-0 min-h-0 flex-1">

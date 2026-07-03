@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "LogicVerse DB Studio",
   "version": "0.1.0",
-  "identifier": "com.kayzzi.logicverse-db-studio",
+  "identifier": "com.logicverse.db-studio",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,10 +13,11 @@
     "windows": [
       {
         "title": "LogicVerse DB Studio",
-        "width": 1400,
-        "height": 900,
-        "minWidth": 960,
-        "minHeight": 600
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true
       }
     ],
     "security": {
@@ -32,6 +33,36 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "copyright": "© 2026 LogicVerse (Kayzzii)",
+    "shortDescription": "Lightweight database management tool",
+    "longDescription": "LogicVerse DB Studio is a fast, lightweight alternative to DBeaver. Manage PostgreSQL, MySQL, and SQLite databases with a modern interface.",
+    "category": "DeveloperTool",
+    "publisher": "LogicVerse",
+    "homepage": "https://github.com/Kayzzii/logicverse-db-studio",
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/nsis-header.bmp",
+        "sidebarImage": "icons/nsis-sidebar.bmp",
+        "installMode": "both",
+        "languages": ["English", "Spanish"]
+      },
+      "wix": null
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"],
+        "section": "database"
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": null
+    }
   }
 }

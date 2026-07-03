@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -50,7 +49,9 @@ pub struct ConnectionInput {
 
 #[derive(Debug, Clone)]
 pub struct ConnectionConfig {
+    #[allow(dead_code)]
     pub id: String,
+    #[allow(dead_code)]
     pub name: String,
     pub driver: DatabaseDriver,
     pub host: String,
@@ -348,10 +349,6 @@ impl ConnectionInput {
 }
 
 impl ConnectionConfig {
-    pub fn build_url(&self) -> AppResult<String> {
-        self.build_url_with_endpoint(&self.host, self.port)
-    }
-
     pub fn build_url_with_endpoint(&self, host: &str, port: u16) -> AppResult<String> {
         use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
@@ -412,13 +409,5 @@ impl ConnectionConfig {
                 }
             }
         }
-    }
-
-    pub fn ssh_key_path_buf(&self) -> Option<PathBuf> {
-        self.ssh_key_path
-            .as_ref()
-            .map(|p| p.trim())
-            .filter(|p| !p.is_empty())
-            .map(PathBuf::from)
     }
 }

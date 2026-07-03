@@ -7,7 +7,7 @@ import {
   highlightActiveLineGutter,
 } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
-import { defaultKeymap, indentWithTab } from "@codemirror/commands";
+import { defaultKeymap, indentWithTab, undo, redo, selectAll } from "@codemirror/commands";
 import { sql, PostgreSQL } from "@codemirror/lang-sql";
 import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
 import { bracketMatching, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -24,6 +24,11 @@ interface QueryEditorProps {
 
 export interface QueryEditorHandle {
   executeSelection: () => void;
+  focus: () => void;
+  selectAll: () => void;
+  insertText: (text: string) => void;
+  undo: () => void;
+  redo: () => void;
 }
 
 const sqlHighlight = HighlightStyle.define([
@@ -109,6 +114,27 @@ export const QueryEditor = forwardRef<QueryEditorHandle, QueryEditorProps>(funct
         view.state.selection.main.to,
       );
       onExecuteRef.current(selection.trim() || undefined);
+    },
+    focus: () => {
+      viewRef.current?.focus();
+    },
+    selectAll: () => {
+      const view = viewRef.current;
+      if (view) selectAll(view);
+    },
+    insertText: (text: string) => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.dispatch(view.state.replaceSelection(text));
+      view.focus();
+    },
+    undo: () => {
+      const view = viewRef.current;
+      if (view) undo(view);
+    },
+    redo: () => {
+      const view = viewRef.current;
+      if (view) redo(view);
     },
   }));
 

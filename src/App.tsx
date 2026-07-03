@@ -1,5 +1,6 @@
-import { useEffect } from "react";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { useCallback, useEffect, useRef, useState } from "react";
+import SplashScreen from "@/components/SplashScreen";
+import { MenuBar } from "@/components/layout/MenuBar";
 import { TopBar } from "@/components/layout/TopBar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { MainPanel } from "@/components/layout/MainPanel";
@@ -18,13 +19,59 @@ function App() {
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const closeTab = useQueryStore((s) => s.closeTab);
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
-  const toggleSidebar = useSettingsStore((s) => s.toggleSidebar);
+  const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
 
+  const [showSplash, setShowSplash] = useState(true);
+  const [appReady, setAppReady] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const lastWidthRef = useRef(240);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const newWidth = Math.max(
+        180,
+        Math.min(450, startWidth + (moveEvent.clientX - startX)),
+      );
+      lastWidthRef.current = newWidth;
+      setSidebarWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  };
+
+  const toggleSidebar = useCallback(() => {
+    if (sidebarCollapsed) {
+      setSidebarWidth(lastWidthRef.current);
+      setSidebarCollapsed(false);
+    } else {
+      lastWidthRef.current = sidebarWidth;
+      setSidebarCollapsed(true);
+    }
+  }, [sidebarCollapsed, setSidebarCollapsed, sidebarWidth]);
+
   useEffect(() => {
-    void loadConnections();
-    void refreshActiveConnection();
-    void loadSettings();
+    let cancelled = false;
+
+    Promise.all([loadConnections(), refreshActiveConnection(), loadSettings()]).finally(() => {
+      if (!cancelled) {
+        setAppReady(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [loadConnections, refreshActiveConnection, loadSettings]);
 
   useEffect(() => {
@@ -48,34 +95,40 @@ function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [addTab, closeTab, activeTabId, tabs, toggleSidebar]);
 
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} ready={appReady} />;
+  }
+
   return (
     <EditorCursorProvider>
       <div className="flex h-screen flex-col overflow-hidden bg-[var(--bg-app)]">
+        <MenuBar onToggleSidebar={toggleSidebar} />
         <TopBar />
         <div className="min-h-0 flex-1">
-          <Group
-            key={sidebarCollapsed ? "collapsed" : "expanded"}
-            orientation="horizontal"
-            id="lv-main-layout"
-          >
+          <div className="flex h-full overflow-hidden">
             {!sidebarCollapsed && (
               <>
-                <Panel
-                  id="sidebar"
-                  defaultSize="240px"
-                  minSize="180px"
-                  maxSize="400px"
-                  className="min-w-[180px]"
+                <div
+                  className="h-full overflow-y-auto overflow-x-hidden border-r border-[var(--border)]"
+                  style={{
+                    width: sidebarWidth,
+                    minWidth: 180,
+                    maxWidth: 450,
+                    flexShrink: 0,
+                  }}
                 >
                   <Sidebar />
-                </Panel>
-                <Separator className="panel-resize-handle" />
+                </div>
+                <div
+                  className="w-[4px] flex-shrink-0 cursor-col-resize bg-[var(--border)] hover:bg-[var(--accent)]"
+                  onMouseDown={handleMouseDown}
+                />
               </>
             )}
-            <Panel id="main" minSize="40%">
+            <div className="min-w-0 flex-1 overflow-hidden">
               <MainPanel />
-            </Panel>
-          </Group>
+            </div>
+          </div>
         </div>
         <StatusBar />
         <ToastContainer />

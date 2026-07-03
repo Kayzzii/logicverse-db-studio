@@ -8,6 +8,14 @@ interface CacheEntry<T> {
   expiresAt: number;
 }
 
+interface LoadOptions {
+  force?: boolean;
+}
+
+interface LoadDatabasesOptions extends LoadOptions {
+  expandDatabase?: string;
+}
+
 interface SchemaNodeState {
   databases: string[];
   schemas: Record<string, string[]>;
@@ -17,10 +25,16 @@ interface SchemaNodeState {
   loading: Record<string, boolean>;
   selectedDatabase: string | null;
   cache: Record<string, CacheEntry<unknown>>;
-  loadDatabases: (connectionId: string) => Promise<void>;
-  loadSchemas: (connectionId: string, database: string) => Promise<void>;
-  loadTables: (connectionId: string, schema: string) => Promise<void>;
-  loadColumns: (connectionId: string, schema: string, table: string) => Promise<void>;
+  loadDatabases: (connectionId: string, options?: LoadDatabasesOptions) => Promise<void>;
+  loadSchemas: (connectionId: string, database: string, options?: LoadOptions) => Promise<void>;
+  loadTables: (connectionId: string, schema: string, options?: LoadOptions) => Promise<void>;
+  loadColumns: (
+    connectionId: string,
+    schema: string,
+    table: string,
+    options?: LoadOptions,
+  ) => Promise<void>;
+  reloadSchema: (connectionId: string, connectedDatabase?: string | null) => Promise<void>;
   toggleExpanded: (key: string) => void;
   setSelectedDatabase: (database: string | null) => void;
   reset: () => void;
@@ -47,6 +61,19 @@ function writeCache<T>(
   };
 }
 
+function invalidateConnectionCache(
+  cache: Record<string, CacheEntry<unknown>>,
+  connectionId: string,
+): Record<string, CacheEntry<unknown>> {
+  const next = { ...cache };
+  for (const key of Object.keys(next)) {
+    if (key.includes(connectionId)) {
+      delete next[key];
+    }
+  }
+  return next;
+}
+
 export const useSchemaStore = create<SchemaNodeState>((set, get) => ({
   databases: [],
   schemas: {},
@@ -57,43 +84,66 @@ export const useSchemaStore = create<SchemaNodeState>((set, get) => ({
   selectedDatabase: null,
   cache: {},
 
-  loadDatabases: async (connectionId) => {
+  loadDatabases: async (connectionId, options = {}) => {
+    const { force = false, expandDatabase } = options;
     const cacheKey = nodeKey("databases", connectionId);
-    const cached = readCache<string[]>(get().cache, cacheKey);
-    if (cached) {
-      set({ databases: cached, selectedDatabase: cached[0] ?? null });
-      if (cached[0]) {
-        await get().loadSchemas(connectionId, cached[0]);
+
+    if (!force) {
+      const cached = readCache<string[]>(get().cache, cacheKey);
+      if (cached !== null) {
+        set({ databases: cached, selectedDatabase: cached[0] ?? null });
+        const database = expandDatabase ?? cached[0];
+        if (database && cached.includes(database)) {
+          set((state) => ({
+            expanded: { ...state.expanded, [nodeKey("db", database)]: true },
+            selectedDatabase: database,
+          }));
+          await get().loadSchemas(connectionId, database);
+        }
+        return;
       }
-      return;
     }
 
     const key = nodeKey("databases", connectionId);
     set((state) => ({ loading: { ...state.loading, [key]: true } }));
     try {
       const databases = await tauriApi.listDatabases(connectionId);
+      const database =
+        expandDatabase && databases.includes(expandDatabase)
+          ? expandDatabase
+          : databases[0] ?? null;
+
       set((state) => ({
         databases,
-        selectedDatabase: databases[0] ?? null,
+        selectedDatabase: database,
         loading: { ...state.loading, [key]: false },
         cache: writeCache(state.cache, cacheKey, databases),
+        expanded: database
+          ? { ...state.expanded, [nodeKey("db", database)]: true }
+          : state.expanded,
       }));
-      if (databases[0]) {
-        await get().loadSchemas(connectionId, databases[0]);
+
+      if (database) {
+        await get().loadSchemas(connectionId, database, { force });
       }
-    } catch {
+    } catch (error) {
       set((state) => ({ loading: { ...state.loading, [key]: false } }));
+      throw error;
     }
   },
 
-  loadSchemas: async (connectionId, database) => {
+  loadSchemas: async (connectionId, database, options = {}) => {
+    const { force = false } = options;
     const cacheKey = nodeKey("schemas", connectionId, database);
-    const cached = readCache<string[]>(get().cache, cacheKey);
-    if (cached) {
-      set((state) => ({
-        schemas: { ...state.schemas, [database]: cached },
-      }));
-      return;
+
+    if (!force) {
+      const cached = readCache<string[]>(get().cache, cacheKey);
+      if (cached !== null) {
+        set((state) => ({
+          schemas: { ...state.schemas, [database]: cached },
+        }));
+        return;
+      }
     }
 
     const key = nodeKey("schemas", connectionId, database);
@@ -105,19 +155,24 @@ export const useSchemaStore = create<SchemaNodeState>((set, get) => ({
         loading: { ...state.loading, [key]: false },
         cache: writeCache(state.cache, cacheKey, schemas),
       }));
-    } catch {
+    } catch (error) {
       set((state) => ({ loading: { ...state.loading, [key]: false } }));
+      throw error;
     }
   },
 
-  loadTables: async (connectionId, schema) => {
+  loadTables: async (connectionId, schema, options = {}) => {
+    const { force = false } = options;
     const cacheKey = nodeKey("tables", connectionId, schema);
-    const cached = readCache<TableInfo[]>(get().cache, cacheKey);
-    if (cached) {
-      set((state) => ({
-        tables: { ...state.tables, [schema]: cached },
-      }));
-      return;
+
+    if (!force) {
+      const cached = readCache<TableInfo[]>(get().cache, cacheKey);
+      if (cached !== null) {
+        set((state) => ({
+          tables: { ...state.tables, [schema]: cached },
+        }));
+        return;
+      }
     }
 
     const key = nodeKey("tables", connectionId, schema);
@@ -129,19 +184,24 @@ export const useSchemaStore = create<SchemaNodeState>((set, get) => ({
         loading: { ...state.loading, [key]: false },
         cache: writeCache(state.cache, cacheKey, tables),
       }));
-    } catch {
+    } catch (error) {
       set((state) => ({ loading: { ...state.loading, [key]: false } }));
+      throw error;
     }
   },
 
-  loadColumns: async (connectionId, schema, table) => {
+  loadColumns: async (connectionId, schema, table, options = {}) => {
+    const { force = false } = options;
     const cacheKey = nodeKey("columns", connectionId, schema, table);
-    const cached = readCache<ColumnInfo[]>(get().cache, cacheKey);
-    if (cached) {
-      set((state) => ({
-        columns: { ...state.columns, [`${schema}.${table}`]: cached },
-      }));
-      return;
+
+    if (!force) {
+      const cached = readCache<ColumnInfo[]>(get().cache, cacheKey);
+      if (cached !== null) {
+        set((state) => ({
+          columns: { ...state.columns, [`${schema}.${table}`]: cached },
+        }));
+        return;
+      }
     }
 
     const key = nodeKey("columns", connectionId, schema, table);
@@ -153,9 +213,27 @@ export const useSchemaStore = create<SchemaNodeState>((set, get) => ({
         loading: { ...state.loading, [key]: false },
         cache: writeCache(state.cache, cacheKey, columns),
       }));
-    } catch {
+    } catch (error) {
       set((state) => ({ loading: { ...state.loading, [key]: false } }));
+      throw error;
     }
+  },
+
+  reloadSchema: async (connectionId, connectedDatabase) => {
+    set((state) => ({
+      cache: invalidateConnectionCache(state.cache, connectionId),
+      databases: [],
+      schemas: {},
+      tables: {},
+      columns: {},
+      expanded: {},
+      loading: {},
+      selectedDatabase: null,
+    }));
+    await get().loadDatabases(connectionId, {
+      force: true,
+      expandDatabase: connectedDatabase ?? undefined,
+    });
   },
 
   toggleExpanded: (key) => {

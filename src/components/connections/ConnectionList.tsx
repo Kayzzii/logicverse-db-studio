@@ -16,6 +16,8 @@ import { ConnectionForm } from "@/components/connections/ConnectionForm";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSchemaStore } from "@/stores/schemaStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useAppActionsStore } from "@/stores/appActionsStore";
+import { useUiStore } from "@/stores/uiStore";
 import { ConnectionSummary } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
@@ -26,12 +28,17 @@ export function ConnectionList() {
   const connect = useConnectionStore((s) => s.connect);
   const disconnect = useConnectionStore((s) => s.disconnect);
   const deleteConnection = useConnectionStore((s) => s.deleteConnection);
-  const loadDatabases = useSchemaStore((s) => s.loadDatabases);
+  const reloadSchema = useSchemaStore((s) => s.reloadSchema);
   const resetSchema = useSchemaStore((s) => s.reset);
   const addToast = useSettingsStore((s) => s.addToast);
+  const registerActions = useAppActionsStore((s) => s.registerActions);
 
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<ConnectionSummary | null>(null);
+  const formOpen = useUiStore((s) => s.connectionFormOpen);
+  const editing = useUiStore((s) => s.connectionFormEditing);
+  const openNewConnection = useUiStore((s) => s.openNewConnection);
+  const openEditConnection = useUiStore((s) => s.openEditConnection);
+  const closeConnectionForm = useUiStore((s) => s.closeConnectionForm);
+
   const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -48,7 +55,7 @@ export function ConnectionList() {
       } else {
         await connect(connection.id);
         resetSchema();
-        await loadDatabases(connection.id);
+        await reloadSchema(connection.id, connection.database);
         addToast("success", `Conectado a ${connection.name}`);
       }
     } catch (error) {
@@ -69,21 +76,54 @@ export function ConnectionList() {
     }
   };
 
+  useEffect(() => {
+    registerActions({
+      connectSelected: () => {
+        if (connections.length === 0) {
+          addToast("error", "No hay conexiones guardadas");
+          openNewConnection();
+          return;
+        }
+        const target =
+          connections.find((c) => c.id !== activeConnectionId) ?? connections[0];
+        void handleConnect(target);
+      },
+      disconnectSelected: () => {
+        if (!activeConnectionId) {
+          addToast("info", "No hay conexión activa");
+          return;
+        }
+        const active = connections.find((c) => c.id === activeConnectionId);
+        if (active) void handleConnect(active);
+      },
+      disconnectAll: () => {
+        if (!activeConnectionId) {
+          addToast("info", "No hay conexión activa");
+          return;
+        }
+        void disconnect(activeConnectionId).then(() => {
+          resetSchema();
+          addToast("info", "Desconectado");
+        });
+      },
+    });
+  }, [
+    activeConnectionId,
+    addToast,
+    connections,
+    disconnect,
+    openNewConnection,
+    registerActions,
+    resetSchema,
+  ]);
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between px-3 py-2">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
           Conexiones
         </h2>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => {
-            setEditing(null);
-            setFormOpen(true);
-          }}
-        >
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openNewConnection}>
           <Plus className="h-4 w-4" />
         </Button>
       </div>
@@ -117,8 +157,11 @@ export function ConnectionList() {
                       <span className="truncate text-sm font-medium">{connection.name}</span>
                       {isActive && <Badge variant="success">Activa</Badge>}
                     </div>
-                    <p className="truncate text-xs text-[var(--color-muted-foreground)]">
-                      {connection.username}@{connection.host}:{connection.port}/{connection.database}
+                    <p className="truncate text-xs text-[var(--text-muted)]">
+                      {connection.driver?.toUpperCase() ?? "PG"} ·{" "}
+                      {connection.driver === "sqlite"
+                        ? connection.database
+                        : `${connection.username}@${connection.host}:${connection.port}/${connection.database}`}
                     </p>
                   </div>
                 </div>
@@ -149,10 +192,7 @@ export function ConnectionList() {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
-                    onClick={() => {
-                      setEditing(connection);
-                      setFormOpen(true);
-                    }}
+                    onClick={() => openEditConnection(connection)}
                   >
                     <Pencil className="h-3 w-3" />
                   </Button>
@@ -173,12 +213,11 @@ export function ConnectionList() {
 
       <ConnectionForm
         open={formOpen}
-        onOpenChange={setFormOpen}
-        connection={editing}
-        onSaved={() => {
-          setFormOpen(false);
-          setEditing(null);
+        onOpenChange={(open) => {
+          if (!open) closeConnectionForm();
         }}
+        connection={editing}
+        onSaved={closeConnectionForm}
       />
     </div>
   );

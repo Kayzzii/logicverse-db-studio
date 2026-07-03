@@ -1,5 +1,11 @@
 import { create } from "zustand";
-import { ColumnInfo, QueryResult, tauriApi } from "@/lib/tauri";
+import {
+  ColumnInfo,
+  ErDiagramData,
+  ExplainResult,
+  QueryResult,
+  tauriApi,
+} from "@/lib/tauri";
 
 export interface TableViewState {
   schema: string;
@@ -7,6 +13,8 @@ export interface TableViewState {
   offset: number;
   pageSize: number;
 }
+
+export type TabView = "sql" | "er";
 
 export interface QueryTab {
   id: string;
@@ -17,6 +25,10 @@ export interface QueryTab {
   error: string | null;
   executing: boolean;
   tableView: TableViewState | null;
+  view: TabView;
+  erData: ErDiagramData | null;
+  explainResult: ExplainResult | null;
+  explainError: string | null;
 }
 
 interface QueryState {
@@ -24,25 +36,33 @@ interface QueryState {
   activeTabId: string | null;
   historyRefreshKey: number;
   addTab: (sql?: string, title?: string) => void;
+  openErTab: (schema: string, data: ErDiagramData) => void;
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   renameTab: (id: string, title: string) => void;
   updateTabSql: (id: string, sql: string) => void;
   loadSqlIntoActiveTab: (sql: string, title?: string) => void;
   executeTab: (id: string, sql: string, connectionId: string) => Promise<void>;
+  explainTab: (id: string, sql: string, connectionId: string) => Promise<void>;
   cancelTab: (id: string) => Promise<void>;
   setTabResult: (id: string, result: QueryResult | null, error?: string | null) => void;
-  openTableView: (schema: string, table: string, connectionId: string) => Promise<void>;
+  openTableView: (
+    schema: string,
+    table: string,
+    connectionId: string,
+    driver: string,
+  ) => Promise<void>;
   paginateTableView: (
     tabId: string,
     direction: "prev" | "next",
     connectionId: string,
+    driver: string,
   ) => Promise<void>;
 }
 
 let tabCounter = 1;
 
-function createTab(sql = "SELECT 1;", title?: string): QueryTab {
+function createTab(sql = "SELECT 1;", title?: string, view: TabView = "sql"): QueryTab {
   const defaultTitle = title ?? `Query ${tabCounter++}`;
   return {
     id: crypto.randomUUID(),
@@ -53,11 +73,39 @@ function createTab(sql = "SELECT 1;", title?: string): QueryTab {
     error: null,
     executing: false,
     tableView: null,
+    view,
+    erData: null,
+    explainResult: null,
+    explainError: null,
   };
 }
 
-function buildTableSql(schema: string, table: string, offset: number, pageSize: number): string {
+export function buildTableSql(
+  driver: string,
+  schema: string,
+  table: string,
+  offset: number,
+  pageSize: number,
+): string {
+  const d = driver.toLowerCase();
+  if (d === "mysql") {
+    return `SELECT * FROM \`${schema}\`.\`${table}\` LIMIT ${pageSize} OFFSET ${offset};`;
+  }
+  if (d === "sqlite") {
+    return `SELECT * FROM "${table}" LIMIT ${pageSize} OFFSET ${offset};`;
+  }
   return `SELECT * FROM "${schema}"."${table}" LIMIT ${pageSize} OFFSET ${offset};`;
+}
+
+export function buildCountSql(driver: string, schema: string, table: string): string {
+  const d = driver.toLowerCase();
+  if (d === "mysql") {
+    return `SELECT COUNT(*) FROM \`${schema}\`.\`${table}\``;
+  }
+  if (d === "sqlite") {
+    return `SELECT COUNT(*) FROM "${table}"`;
+  }
+  return `SELECT COUNT(*) FROM "${schema}"."${table}"`;
 }
 
 export const useQueryStore = create<QueryState>((set, get) => {
@@ -70,6 +118,15 @@ export const useQueryStore = create<QueryState>((set, get) => {
 
     addTab: (sql, title) => {
       const tab = createTab(sql, title);
+      set((state) => ({
+        tabs: [...state.tabs, tab],
+        activeTabId: tab.id,
+      }));
+    },
+
+    openErTab: (schema, data) => {
+      const tab = createTab("", `ER: ${schema}`, "er");
+      tab.erData = data;
       set((state) => ({
         tabs: [...state.tabs, tab],
         activeTabId: tab.id,
@@ -104,7 +161,7 @@ export const useQueryStore = create<QueryState>((set, get) => {
     updateTabSql: (id, sql) => {
       set((state) => ({
         tabs: state.tabs.map((tab) =>
-          tab.id === id ? { ...tab, sql, tableView: null } : tab,
+          tab.id === id ? { ...tab, sql, tableView: null, explainResult: null, explainError: null } : tab,
         ),
       }));
     },
@@ -122,6 +179,9 @@ export const useQueryStore = create<QueryState>((set, get) => {
                 tableView: null,
                 result: null,
                 error: null,
+                explainResult: null,
+                explainError: null,
+                view: "sql" as TabView,
               }
             : tab,
         ),
@@ -133,7 +193,16 @@ export const useQueryStore = create<QueryState>((set, get) => {
       set((state) => ({
         tabs: state.tabs.map((tab) =>
           tab.id === id
-            ? { ...tab, executing: true, queryId, error: null, result: null, sql }
+            ? {
+                ...tab,
+                executing: true,
+                queryId,
+                error: null,
+                result: null,
+                sql,
+                explainResult: null,
+                explainError: null,
+              }
             : tab,
         ),
       }));
@@ -149,6 +218,41 @@ export const useQueryStore = create<QueryState>((set, get) => {
         );
       } finally {
         set((state) => ({ historyRefreshKey: state.historyRefreshKey + 1 }));
+      }
+    },
+
+    explainTab: async (id, sql, connectionId) => {
+      const queryId = await tauriApi.generateQueryId();
+      set((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.id === id
+            ? { ...tab, executing: true, queryId, explainResult: null, explainError: null }
+            : tab,
+        ),
+      }));
+
+      try {
+        const explainResult = await tauriApi.explainQuery(connectionId, queryId, sql);
+        set((state) => ({
+          tabs: state.tabs.map((tab) =>
+            tab.id === id
+              ? { ...tab, executing: false, queryId: null, explainResult, explainError: null }
+              : tab,
+          ),
+        }));
+      } catch (error) {
+        set((state) => ({
+          tabs: state.tabs.map((tab) =>
+            tab.id === id
+              ? {
+                  ...tab,
+                  executing: false,
+                  queryId: null,
+                  explainError: error instanceof Error ? error.message : String(error),
+                }
+              : tab,
+          ),
+        }));
       }
     },
 
@@ -172,10 +276,10 @@ export const useQueryStore = create<QueryState>((set, get) => {
       }));
     },
 
-    openTableView: async (schema, table, connectionId) => {
+    openTableView: async (schema, table, connectionId, driver) => {
       const pageSize = 100;
       const offset = 0;
-      const sql = buildTableSql(schema, table, offset, pageSize);
+      const sql = buildTableSql(driver, schema, table, offset, pageSize);
       const tab = createTab(sql, table);
       tab.tableView = { schema, table, offset, pageSize };
 
@@ -187,7 +291,7 @@ export const useQueryStore = create<QueryState>((set, get) => {
       await get().executeTab(tab.id, sql, connectionId);
     },
 
-    paginateTableView: async (tabId, direction, connectionId) => {
+    paginateTableView: async (tabId, direction, connectionId, driver) => {
       const tab = get().tabs.find((t) => t.id === tabId);
       if (!tab?.tableView) return;
 
@@ -199,7 +303,7 @@ export const useQueryStore = create<QueryState>((set, get) => {
 
       if (newOffset === offset) return;
 
-      const sql = buildTableSql(schema, table, newOffset, pageSize);
+      const sql = buildTableSql(driver, schema, table, newOffset, pageSize);
       set((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === tabId

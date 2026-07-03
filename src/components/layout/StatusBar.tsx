@@ -26,15 +26,8 @@ export function StatusBar() {
 
     const fetchVersion = async () => {
       try {
-        const queryId = await tauriApi.generateQueryId();
-        const result = await tauriApi.executeQuery(
-          activeConnectionId,
-          queryId,
-          "SHOW server_version",
-        );
-        if (!cancelled && result.rows[0]?.[0]) {
-          setServerVersion(`PostgreSQL ${result.rows[0][0]}`);
-        }
+        const version = await tauriApi.getServerVersion(activeConnectionId);
+        if (!cancelled) setServerVersion(version);
       } catch {
         if (!cancelled) setServerVersion(null);
       }
@@ -46,6 +39,12 @@ export function StatusBar() {
     };
   }, [activeConnectionId]);
 
+  const connectionLabel = activeConnection
+    ? activeConnection.driver === "sqlite"
+      ? activeConnection.database
+      : `${activeConnection.host}:${activeConnection.port}/${activeConnection.database}`
+    : "Desconectado";
+
   const statsText =
     currentTab?.result && !currentTab.executing
       ? `${formatRowCount(currentTab.result.rowCount)} rows · ${formatDuration(currentTab.result.executionTimeMs)}`
@@ -56,11 +55,7 @@ export function StatusBar() {
   return (
     <footer className="flex h-[22px] shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--bg-panel)] px-3 font-mono-db text-[11px]">
       <div className="flex items-center">
-        <span className="text-[var(--text-dim)]">
-          {activeConnection
-            ? `${activeConnection.host}:${activeConnection.port}/${activeConnection.database}`
-            : "Desconectado"}
-        </span>
+        <span className="text-[var(--text-dim)]">{connectionLabel}</span>
 
         {serverVersion && (
           <>

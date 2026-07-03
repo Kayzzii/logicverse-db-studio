@@ -27,22 +27,6 @@ impl DatabaseDriver {
             Self::Sqlite => "sqlite",
         }
     }
-
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Postgres => "PostgreSQL",
-            Self::Mysql => "MySQL",
-            Self::Sqlite => "SQLite",
-        }
-    }
-
-    pub fn default_port(self) -> u16 {
-        match self {
-            Self::Postgres => 5432,
-            Self::Mysql => 3306,
-            Self::Sqlite => 0,
-        }
-    }
 }
 
 pub fn default_driver_str() -> String {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, Plus, Table2, X } from "lucide-react";
+import { FileText, GitBranch, Plus, Table2, X } from "lucide-react";
 import { useQueryStore } from "@/stores/queryStore";
 import { cn } from "@/lib/utils";
 
@@ -44,14 +44,17 @@ export function QueryTabs() {
     closeTab(tabId);
   };
 
-  const isTableTab = (tab: { title: string; tableView: unknown }) =>
-    !!tab.tableView || (!tab.title.toLowerCase().startsWith("query") && tab.title !== "Query");
+  const isTableTab = (tab: { title: string; tableView: unknown; view: string }) =>
+    tab.view === "er" ||
+    !!tab.tableView ||
+    (!tab.title.toLowerCase().startsWith("query") && tab.title !== "Query");
 
   return (
     <div className="flex h-[34px] shrink-0 items-end overflow-x-auto border-b border-[var(--border)] bg-[var(--bg-panel)]">
       {tabs.map((tab) => {
         const isActive = currentActive === tab.id;
         const showTableIcon = isTableTab(tab);
+        const isErTab = tab.view === "er";
 
         return (
           <div
@@ -63,7 +66,15 @@ export function QueryTabs() {
                 : "border-t-transparent bg-[var(--bg-panel)] text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
             )}
           >
-            {showTableIcon ? (
+            {isErTab ? (
+              <GitBranch
+                className={cn(
+                  "h-3 w-3 shrink-0",
+                  isActive ? "text-[var(--accent)]" : "text-[var(--text-ghost)]",
+                )}
+                strokeWidth={1.75}
+              />
+            ) : showTableIcon ? (
               <Table2
                 className={cn(
                   "h-3 w-3 shrink-0",

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { LayoutGrid, Moon, Settings, Sun } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { Moon, Settings, Sun } from "lucide-react";
+import { LogicVerseLogo } from "@/components/shared/LogicVerseLogo";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +11,7 @@ import {
 import { ConnectionList } from "@/components/connections/ConnectionList";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { Theme, useSettingsStore } from "@/stores/settingsStore";
+import { useUiStore } from "@/stores/uiStore";
 import { cn } from "@/lib/utils";
 
 export function TopBar() {
@@ -17,8 +19,10 @@ export function TopBar() {
   const connections = useConnectionStore((s) => s.connections);
   const theme = useSettingsStore((s) => s.theme);
   const setTheme = useSettingsStore((s) => s.setTheme);
-  const [connectionsOpen, setConnectionsOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const connectionsOpen = useUiStore((s) => s.connectionsDialogOpen);
+  const setConnectionsDialogOpen = useUiStore((s) => s.setConnectionsDialogOpen);
+  const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const settingsRef = useRef<HTMLDivElement>(null);
 
   const activeConnection = connections.find((c) => c.id === activeConnectionId);
@@ -43,13 +47,13 @@ export function TopBar() {
   return (
     <header className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--bg-panel)] px-3">
       <div className="flex items-center gap-2">
-        <LayoutGrid className="h-4 w-4 text-[var(--accent)]" strokeWidth={1.75} />
+        <LogicVerseLogo size={16} />
         <span className="text-[13px] font-semibold text-[var(--text-primary)]">LogicVerse</span>
         <span className="text-[13px] font-normal text-[var(--text-muted)]">DB Studio</span>
       </div>
 
       <div className="flex items-center gap-2.5">
-        <Dialog open={connectionsOpen} onOpenChange={setConnectionsOpen}>
+        <Dialog open={connectionsOpen} onOpenChange={setConnectionsDialogOpen}>
           <DialogTrigger asChild>
             <button
               type="button"
@@ -96,7 +100,7 @@ export function TopBar() {
               "rounded p-1 text-[var(--text-muted)] transition-opacity hover:opacity-80",
               settingsOpen ? "opacity-80" : "opacity-[0.45]",
             )}
-            onClick={() => setSettingsOpen((open) => !open)}
+            onClick={() => setSettingsOpen(!settingsOpen)}
             title="Configuración"
           >
             <Settings className="h-[15px] w-[15px]" strokeWidth={1.5} />

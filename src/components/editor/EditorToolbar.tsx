@@ -9,6 +9,7 @@ interface EditorToolbarProps {
   onExecuteSelection: () => void;
   onCancel: () => void;
   onSave: () => void;
+  onExplain: () => void;
 }
 
 function ToolbarButton({
@@ -21,7 +22,7 @@ function ToolbarButton({
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
-  variant?: "run" | "default" | "ghost";
+  variant?: "run" | "default" | "ghost" | "action";
   className?: string;
 }) {
   return (
@@ -37,6 +38,8 @@ function ToolbarButton({
           "border border-[var(--border-strong)] bg-transparent text-[var(--text-secondary)] hover:border-[rgba(255,255,255,0.14)] hover:text-[var(--text-primary)]",
         variant === "ghost" &&
           "cursor-not-allowed border border-transparent bg-transparent text-[var(--text-ghost)]",
+        variant === "action" &&
+          "border border-[var(--border-strong)] bg-transparent text-[var(--text-secondary)] hover:border-[rgba(255,255,255,0.14)] hover:text-[var(--text-primary)]",
         disabled && variant !== "ghost" && "opacity-50",
         className,
       )}
@@ -52,6 +55,7 @@ export function EditorToolbar({
   onExecuteSelection,
   onCancel,
   onSave,
+  onExplain,
 }: EditorToolbarProps) {
   const [savedOpen, setSavedOpen] = useState(false);
 
@@ -87,11 +91,12 @@ export function EditorToolbar({
 
         <div className="mx-0.5 h-[14px] w-px bg-[rgba(255,255,255,0.08)]" />
 
+        <ToolbarButton variant="action" disabled={executing} onClick={onExplain}>
+          Explain
+        </ToolbarButton>
+
         <ToolbarButton variant="ghost" disabled>
           Format
-        </ToolbarButton>
-        <ToolbarButton variant="ghost" disabled>
-          Explain
         </ToolbarButton>
 
         <span className="ml-auto font-mono-db text-[11px] tracking-[0.2px] text-[var(--text-ghost)]">

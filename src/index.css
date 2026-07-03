@@ -196,7 +196,8 @@ body {
 }
 
 .panel-resize-handle[data-panel-group-direction="horizontal"] {
-  width: 1px;
+  width: 4px;
+  min-width: 4px;
   cursor: col-resize;
   background: var(--border);
   border: none;
@@ -262,4 +263,17 @@ body {
     opacity: 1;
     transform: translateX(0);
   }
+}
+
+@keyframes splash-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.splash-shimmer {
+  animation: splash-shimmer 1.2s ease-in-out infinite;
 }

@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 
 use crate::config::connections::ConnectionConfig;
-use crate::db::driver::DatabaseDriver;
 use crate::db::introspection::{mysql, postgres, sqlite};
 use crate::db::pool::DatabasePool;
 use crate::db::types::{ColumnInfo, TableInfo};
@@ -9,8 +8,6 @@ use crate::error::AppResult;
 
 #[async_trait]
 pub trait DatabaseBackend: Send + Sync {
-    fn driver(&self) -> DatabaseDriver;
-    fn config(&self) -> &ConnectionConfig;
     fn pool(&self) -> &DatabasePool;
 
     async fn list_databases(&self) -> AppResult<Vec<String>>;
@@ -48,14 +45,6 @@ impl ConnectedBackend {
 
 #[async_trait]
 impl DatabaseBackend for ConnectedBackend {
-    fn driver(&self) -> DatabaseDriver {
-        self.config.driver
-    }
-
-    fn config(&self) -> &ConnectionConfig {
-        &self.config
-    }
-
     fn pool(&self) -> &DatabasePool {
         &self.pool
     }

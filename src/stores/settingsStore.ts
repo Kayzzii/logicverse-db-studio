@@ -16,6 +16,7 @@ interface SettingsState {
   maxRows: number;
   settingsLoaded: boolean;
   toasts: ToastMessage[];
+  setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebar: () => void;
   loadSettings: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
@@ -33,6 +34,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   maxRows: 100_000,
   settingsLoaded: false,
   toasts: [],
+
+  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
 
   toggleSidebar: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),

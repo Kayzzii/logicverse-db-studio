@@ -18,7 +18,6 @@ use uuid::Uuid;
 
 pub use backend::{ConnectedBackend, DatabaseBackend};
 pub use driver::{default_driver_str, DatabaseDriver};
-pub use pool::DatabasePool;
 pub use types::{
     ColumnInfo, ErDiagramData, ExplainResult, QueryResult, TableInfo,
 };

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -15,7 +15,7 @@ import {
   Table2,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { SchemaSearch } from "@/components/schema/SchemaSearch";
+import { SchemaSearch, SchemaSearchHandle } from "@/components/schema/SchemaSearch";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -25,8 +25,9 @@ import {
 } from "@/components/ui/context-menu";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { nodeKey, useSchemaStore } from "@/stores/schemaStore";
-import { useQueryStore, useSchemaCompletionStore } from "@/stores/queryStore";
+import { buildCountSql, useQueryStore, useSchemaCompletionStore } from "@/stores/queryStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useAppActionsStore } from "@/stores/appActionsStore";
 import { ColumnInfo } from "@/lib/tauri";
 import { tauriApi } from "@/lib/tauri";
 import { copyToClipboard } from "@/lib/formatters";
@@ -164,6 +165,7 @@ export function SchemaTree() {
   const connectionList = useConnectionStore((s) => s.connections);
   const activeConnection = connectionList.find((c) => c.id === activeConnectionId);
   const connectedDatabase = activeConnection?.database ?? null;
+  const driver = activeConnection?.driver ?? "postgres";
 
   const databases = useSchemaStore((s) => s.databases);
   const schemas = useSchemaStore((s) => s.schemas);
@@ -173,6 +175,7 @@ export function SchemaTree() {
   const loading = useSchemaStore((s) => s.loading);
   const selectedDatabase = useSchemaStore((s) => s.selectedDatabase);
   const loadDatabases = useSchemaStore((s) => s.loadDatabases);
+  const reloadSchema = useSchemaStore((s) => s.reloadSchema);
   const loadSchemas = useSchemaStore((s) => s.loadSchemas);
   const loadTables = useSchemaStore((s) => s.loadTables);
   const loadColumns = useSchemaStore((s) => s.loadColumns);
@@ -180,9 +183,12 @@ export function SchemaTree() {
   const setSelectedDatabase = useSchemaStore((s) => s.setSelectedDatabase);
 
   const openTableView = useQueryStore((s) => s.openTableView);
+  const openErTab = useQueryStore((s) => s.openErTab);
   const setCompletionItems = useSchemaCompletionStore((s) => s.setItems);
   const addToast = useSettingsStore((s) => s.addToast);
+  const registerActions = useAppActionsStore((s) => s.registerActions);
 
+  const searchRef = useRef<SchemaSearchHandle>(null);
   const [search, setSearch] = useState("");
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [tableCounts, setTableCounts] = useState<Record<string, number>>({});
@@ -225,7 +231,7 @@ export function SchemaTree() {
         const result = await tauriApi.executeQuery(
           activeConnectionId,
           queryId,
-          `SELECT COUNT(*) FROM "${schema}"."${table}"`,
+          buildCountSql(driver, schema, table),
         );
         const count = Number(result.rows[0]?.[0] ?? 0);
         setTableCounts((prev) => ({ ...prev, [key]: count }));
@@ -235,15 +241,62 @@ export function SchemaTree() {
         setCountLoading((prev) => ({ ...prev, [key]: false }));
       }
     },
-    [activeConnectionId, countLoading, tableCounts],
+    [activeConnectionId, countLoading, driver, tableCounts],
   );
 
   const handleOpenTable = (schema: string, table: string) => {
     setSelectedTable(`${schema}.${table}`);
     if (activeConnectionId) {
-      void openTableView(schema, table, activeConnectionId);
+      void openTableView(schema, table, activeConnectionId, driver);
     }
   };
+
+  const handleOpenErDiagram = useCallback(
+    async (schema: string) => {
+      if (!activeConnectionId) return;
+      try {
+        const data = await tauriApi.getTableRelations(activeConnectionId, schema);
+        openErTab(schema, data);
+      } catch (error) {
+        addToast("error", error instanceof Error ? error.message : String(error));
+      }
+    },
+    [activeConnectionId, addToast, openErTab],
+  );
+
+  const handleRefreshSchema = useCallback(async () => {
+    if (!activeConnectionId) {
+      addToast("error", "Conectá una base de datos primero");
+      return;
+    }
+    try {
+      await reloadSchema(activeConnectionId, connectedDatabase);
+      addToast("success", "Schema recargado");
+    } catch (error) {
+      addToast("error", error instanceof Error ? error.message : String(error));
+    }
+  }, [activeConnectionId, addToast, connectedDatabase, reloadSchema]);
+
+  useEffect(() => {
+    registerActions({
+      refreshSchema: () => void handleRefreshSchema(),
+      focusSchemaSearch: () => {
+        document.getElementById("schema-browser")?.scrollIntoView({ behavior: "smooth" });
+        searchRef.current?.focus();
+      },
+      searchTables: () => {
+        searchRef.current?.focus();
+      },
+      goToSchemaBrowser: () => {
+        document.getElementById("schema-browser")?.scrollIntoView({ behavior: "smooth" });
+        searchRef.current?.focus();
+      },
+      viewErDiagram: () => {
+        const schema = filteredSchemas[0] ?? "public";
+        void handleOpenErDiagram(schema);
+      },
+    });
+  }, [filteredSchemas, handleOpenErDiagram, handleRefreshSchema, registerActions]);
 
   const handleCopy = async (text: string, message: string) => {
     await copyToClipboard(text);
@@ -258,10 +311,24 @@ export function SchemaTree() {
       delete next[key];
       return next;
     });
-    await loadColumns(activeConnectionId, schema, table);
-    await fetchTableCount(schema, table);
-    updateCompletionItems();
+    try {
+      await loadColumns(activeConnectionId, schema, table, { force: true });
+      await fetchTableCount(schema, table);
+      updateCompletionItems();
+    } catch (error) {
+      addToast("error", error instanceof Error ? error.message : String(error));
+    }
   };
+
+  useEffect(() => {
+    if (activeConnectionId && databases.length === 0) {
+      void loadDatabases(activeConnectionId, {
+        expandDatabase: connectedDatabase ?? undefined,
+      }).catch((error) => {
+        addToast("error", error instanceof Error ? error.message : String(error));
+      });
+    }
+  }, [activeConnectionId, connectedDatabase, databases.length, loadDatabases, addToast]);
 
   useEffect(() => {
     updateCompletionItems();
@@ -307,7 +374,7 @@ export function SchemaTree() {
 
   return (
     <div className="flex h-full flex-col">
-      <SchemaSearch value={search} onChange={setSearch} />
+      <SchemaSearch ref={searchRef} value={search} onChange={setSearch} />
       <ScrollArea className="flex-1">
         <div className="pb-2">
           {databases.map((database) => {
@@ -348,7 +415,9 @@ export function SchemaTree() {
                       );
 
                       return (
-                        <div key={schema}>
+                        <ContextMenu key={schema}>
+                          <ContextMenuTrigger asChild>
+                            <div>
                           <TreeRow
                             indent={INDENT.schema}
                             expanded={schemaExpanded}
@@ -493,7 +562,14 @@ export function SchemaTree() {
                               />
                             </div>
                           )}
-                        </div>
+                            </div>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent>
+                            <ContextMenuItem onClick={() => void handleOpenErDiagram(schema)}>
+                              View ER Diagram
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
                       );
                     })}
                   </div>
@@ -506,7 +582,7 @@ export function SchemaTree() {
             <button
               type="button"
               className="mx-2.5 mt-2 flex w-[calc(100%-20px)] items-center justify-center gap-2 rounded border border-dashed border-[var(--border)] py-3 font-mono-db text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
-              onClick={() => void loadDatabases(activeConnectionId)}
+              onClick={() => void handleRefreshSchema()}
             >
               <RefreshCw className="h-3.5 w-3.5" />
               Cargar schema

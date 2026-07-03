@@ -3,22 +3,35 @@ import { invoke } from "@tauri-apps/api/core";
 export interface ConnectionSummary {
   id: string;
   name: string;
+  driver: string;
   host: string;
   port: number;
   database: string;
   username: string;
   sslMode: string;
+  sshEnabled?: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
+  sshKeyPath?: string;
 }
 
 export interface ConnectionInput {
   id?: string;
   name: string;
+  driver: string;
   host: string;
   port: number;
   database: string;
   username: string;
   password: string;
   sslMode: string;
+  sshEnabled?: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
+  sshPassword?: string;
+  sshKeyPath?: string;
 }
 
 export interface TableInfo {
@@ -29,6 +42,7 @@ export interface TableInfo {
 export interface ForeignKeyRef {
   schema: string;
   table: string;
+  column?: string;
 }
 
 export interface ColumnInfo {
@@ -84,6 +98,44 @@ export interface AppSettings {
   maxRows: number;
 }
 
+export interface ExplainPlanNode {
+  nodeType: string;
+  relationName: string | null;
+  alias: string | null;
+  estimatedRows: number | null;
+  actualRows: number | null;
+  estimatedCost: number | null;
+  actualTimeMs: number | null;
+  rowsRatio: number | null;
+  children: ExplainPlanNode[];
+}
+
+export interface ExplainResult {
+  driver: string;
+  executionTimeMs: number;
+  root: ExplainPlanNode;
+}
+
+export interface ErTable {
+  schema: string;
+  name: string;
+  columns: ColumnInfo[];
+}
+
+export interface ErRelation {
+  fromSchema: string;
+  fromTable: string;
+  fromColumn: string;
+  toSchema: string;
+  toTable: string;
+  toColumn: string;
+}
+
+export interface ErDiagramData {
+  tables: ErTable[];
+  relations: ErRelation[];
+}
+
 export const tauriApi = {
   listConnections: () => invoke<ConnectionSummary[]>("list_connections"),
   saveConnection: (input: ConnectionInput) =>
@@ -105,6 +157,12 @@ export const tauriApi = {
     invoke<TableInfo[]>("list_tables", { connectionId, schema }),
   listColumns: (connectionId: string, schema: string, table: string) =>
     invoke<ColumnInfo[]>("list_columns", { connectionId, schema, table }),
+  getServerVersion: (connectionId: string) =>
+    invoke<string>("get_server_version", { connectionId }),
+  explainQuery: (connectionId: string, queryId: string, sql: string) =>
+    invoke<ExplainResult>("explain_query", { connectionId, queryId, sql }),
+  getTableRelations: (connectionId: string, schema: string) =>
+    invoke<ErDiagramData>("get_table_relations", { connectionId, schema }),
   executeQuery: (connectionId: string, queryId: string, sql: string) =>
     invoke<QueryResult>("execute_query", { connectionId, queryId, sql }),
   cancelQuery: (queryId: string) => invoke<void>("cancel_query", { queryId }),
