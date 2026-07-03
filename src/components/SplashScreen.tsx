@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LogicVerseLogo } from "@/components/shared/LogicVerseLogo";
+import splashLogo from "../assets/logo-splash.svg";
 import { cn } from "@/lib/utils";
 
 const APP_VERSION = "v0.1.0";
@@ -55,7 +55,13 @@ export default function SplashScreen({ onFinish, ready = false }: SplashScreenPr
       }}
     >
       <div className="flex flex-col items-center px-6 text-center">
-        <LogicVerseLogo size={120} className="mb-6 drop-shadow-[0_8px_32px_rgba(137,180,250,0.25)]" />
+        <img
+          src={splashLogo}
+          alt=""
+          aria-hidden
+          draggable={false}
+          className="mb-6 w-[200px] drop-shadow-[0_8px_32px_rgba(137,180,250,0.25)]"
+        />
 
         <h1 className="text-[28px] font-semibold leading-none text-[var(--text-primary,#cdd6f4)]">
           LogicVerse{" "}

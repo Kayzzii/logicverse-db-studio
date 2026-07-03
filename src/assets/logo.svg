@@ -1,43 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none" aria-hidden="true">
-  <defs>
-    <linearGradient id="lv-body" x1="24" y1="28" x2="96" y2="96" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#89b4fa"/>
-      <stop offset="1" stop-color="#6a9fd8"/>
-    </linearGradient>
-    <linearGradient id="lv-top" x1="36" y1="24" x2="84" y2="48" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#a6c8ff"/>
-      <stop offset="1" stop-color="#89b4fa"/>
-    </linearGradient>
-    <linearGradient id="lv-accent" x1="48" y1="52" x2="88" y2="92" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#cba6f7"/>
-      <stop offset="1" stop-color="#9d7fd4"/>
-    </linearGradient>
-  </defs>
+<svg width="250" height="48" viewBox="0 0 250 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">LogicVerse DB Studio horizontal logo</title>
+  <desc id="desc">Stylized database cylinder with LV monogram and LogicVerse DB Studio wordmark.</desc>
+  <style>
+    .brand { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  </style>
 
-  <!-- Database cylinder -->
-  <ellipse cx="60" cy="34" rx="34" ry="11" fill="url(#lv-top)"/>
-  <path
-    d="M26 34v44c0 8.8 15.2 16 34 16s34-7.2 34-16V34"
-    fill="url(#lv-body)"
-  />
-  <ellipse cx="60" cy="34" rx="34" ry="11" fill="none" stroke="#7aa2e0" stroke-width="1.2" opacity="0.55"/>
+  <!-- Symbol -->
+  <g transform="translate(0 0)">
+    <!-- Database cylinder body -->
+    <path d="M24 5C34.5 5 43 8.1 43 12V36C43 39.9 34.5 43 24 43C13.5 43 5 39.9 5 36V12C5 8.1 13.5 5 24 5Z" fill="#89b4fa"/>
 
-  <!-- Table grid -->
-  <path d="M38 48h44M38 58h44M38 68h44M48 48v28M60 48v28M72 48v28" stroke="#1e1e2e" stroke-width="2.2" stroke-linecap="round" opacity="0.35"/>
+    <!-- Data rows / cylinder cuts -->
+    <path d="M5 20C8.6 23.1 15.5 25 24 25C32.5 25 39.4 23.1 43 20V24C38.8 26.7 32.2 28.4 24 28.4C15.8 28.4 9.2 26.7 5 24V20Z" fill="#1e1e2e" fill-opacity="0.95"/>
+    <path d="M5 31C8.6 34.1 15.5 36 24 36C32.5 36 39.4 34.1 43 31V35C38.8 37.7 32.2 39.4 24 39.4C15.8 39.4 9.2 37.7 5 35V31Z" fill="#1e1e2e" fill-opacity="0.95"/>
 
-  <!-- LV monogram -->
-  <path
-    d="M42 78 L42 92 L48 92 L48 84 L54 92 L60 92 L52 82 L60 72 L54 72 L48 80 L48 72 L42 72 Z"
-    fill="#11111b"
-    opacity="0.85"
-  />
-  <path
-    d="M64 72 H70 C76 72 80 75.5 80 80.5 C80 85.5 76 89 70 89 H64 V72 Z M70 84.5 C72.8 84.5 74.5 83 74.5 80.5 C74.5 78 72.8 76.5 70 76.5 H68.5 V84.5 H70 Z"
-    fill="#11111b"
-    opacity="0.85"
-  />
+    <!-- Top ellipse line -->
+    <ellipse cx="24" cy="12" rx="19" ry="7" fill="#89b4fa"/>
+    <path d="M8 12C8 9.8 15.2 8 24 8C32.8 8 40 9.8 40 12C40 14.2 32.8 16 24 16C15.2 16 8 14.2 8 12Z" fill="#1e1e2e" fill-opacity="0.12"/>
 
-  <!-- Speed accent -->
-  <path d="M82 30 L94 24 L90 36 Z" fill="url(#lv-accent)"/>
-  <path d="M88 38 L100 32" stroke="#cba6f7" stroke-width="2.5" stroke-linecap="round"/>
+    <!-- LV monogram, simplified for small sizes -->
+    <path d="M14 17H19V31H28V36H14V17Z" fill="#1e1e2e" fill-opacity="0.92"/>
+    <path d="M25 17H30L33.6 29.2L37.2 17H42L36.2 36H31L25 17Z" fill="#cba6f7"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text class="brand" x="62" y="31" font-size="20" letter-spacing="-0.35" dominant-baseline="middle">
+    <tspan font-weight="600" fill="#cdd6f4">LogicVerse</tspan>
+    <tspan dx="5" font-weight="300" fill="#6c7086">DB Studio</tspan>
+  </text>
 </svg>
